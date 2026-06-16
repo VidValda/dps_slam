@@ -121,6 +121,12 @@ private:
     const dps_slam_msgs::msg::DetectionWithID _msg,
     const std_msgs::msg::Header _header,
     const OdometryInfo _detection_odometry_info);
+  // A cylinder is decomposed into two landmarks: a point (its top end, reusing the
+  // gate/point backend) and a direction (its axis, a unit-vector landmark).
+  void processCylinderDetection(
+    const dps_slam_msgs::msg::DetectionWithID _msg,
+    const std_msgs::msg::Header _header,
+    const OdometryInfo _detection_odometry_info);
 
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;

@@ -249,4 +249,57 @@ protected:
   g2o::Plane3D edge_measurement_;
 };
 
+// A direction (unit-vector) landmark, e.g. a cylinder's axis. The measurement is the
+// direction observed in the robot frame; the landmark stores it in the map frame.
+// Only the rotational part of the odometry transform is applied. `anchor_` is a
+// world-frame point carried through for visualization of the axis arrow.
+class ObjectDetectionDirection : public ObjectDetectionBase
+{
+public:
+  ObjectDetectionDirection(
+    const std::string & _id, const Eigen::Vector3d _direction,
+    const Eigen::MatrixXd & _covariance, const bool _detections_are_absolute,
+    const Eigen::Vector3d & _anchor = Eigen::Vector3d::Zero())
+  : ObjectDetectionBase(_id, _covariance, _detections_are_absolute),
+    measured_direction_(_direction.normalized()), anchor_(_anchor) {}
+
+  bool prepareMeasurements(const OdometryInfo & _detection_odometry) override
+  {
+    if (detections_are_absolute_) {
+      edge_measurement_ = _detection_odometry.odom_ref.rotation().inverse() * measured_direction_;
+      node_estimation_ = measured_direction_;
+    } else {
+      edge_measurement_ = measured_direction_;
+      node_estimation_ = _detection_odometry.map_ref.rotation() * measured_direction_;
+    }
+    edge_measurement_.normalize();
+    node_estimation_.normalize();
+    return true;
+  }
+
+  GraphNode * createNode() override
+  {
+    GraphNodeDirection * node = new GraphNodeDirection(node_estimation_);
+    node->setCovariance(covariance_matrix_);
+    node->setAnchor(anchor_);
+    return node;
+  }
+
+  GraphEdge * createEdge(GraphNode * _node, GraphNode * _detection_node) override
+  {
+    GraphNodeSE3 * node_se3 = dynamic_cast<GraphNodeSE3 *>(_node);
+    GraphNodeDirection * detection_node_dir = dynamic_cast<GraphNodeDirection *>(_detection_node);
+    if (!node_se3) {DEBUG("Reference node is null");}
+    if (!detection_node_dir) {DEBUG("Detection node is null");}
+    return new GraphEdgeSE3Direction(
+      node_se3, detection_node_dir, edge_measurement_, information_matrix_);
+  }
+
+protected:
+  Eigen::Vector3d measured_direction_;
+  Eigen::Vector3d node_estimation_;
+  Eigen::Vector3d edge_measurement_;
+  Eigen::Vector3d anchor_;
+};
+
 #endif  // AS2_SLAM__OBJECTS_TYPES_HPP_

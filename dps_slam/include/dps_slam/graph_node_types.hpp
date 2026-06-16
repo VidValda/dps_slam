@@ -51,6 +51,7 @@
 #include <string>
 
 #include <visualization_msgs/msg/marker.hpp>
+#include "g2o/g2o_edge_types.hpp"
 #include "utils/conversions.hpp"
 
 class GraphNode
@@ -259,6 +260,85 @@ protected:
   std::string element_name_ = "node";
   std::string node_name_ = "Plane";
   Eigen::Vector4d viz_color_ = {1.0, 0.5, 0.0, 1.0};
+  Eigen::MatrixXd cov_matrix_;
+};
+
+// Direction (unit-vector) landmark, e.g. a cylinder's axis. Wraps a g2o S^2 vertex.
+// `anchor_` is a world-frame point used only to place the visualization arrow; it does
+// not participate in optimization.
+class GraphNodeDirection : public GraphNode
+{
+public:
+  explicit GraphNodeDirection(const Eigen::Vector3d & _direction)
+  {
+    vertex_ = new g2o_custom::VertexUnitVector3();
+    vertex_->setEstimate(_direction.normalized());
+  }
+  ~GraphNodeDirection() {}
+
+  g2o::HyperGraph::Vertex * getVertex() override
+  {
+    return static_cast<g2o::HyperGraph::Vertex *>(vertex_);
+  }
+
+  g2o_custom::VertexUnitVector3 * getVertexDirection() {return vertex_;}
+
+  visualization_msgs::msg::Marker getVizMarker(const bool _main) override
+  {
+    visualization_msgs::msg::Marker node_marker_msg;
+    node_marker_msg.type = visualization_msgs::msg::Marker::ARROW;
+    node_marker_msg.ns = getVizMarkerNamespace();
+    node_marker_msg.id = vertex_->id();
+
+    // Draw an arrow from the anchor along the estimated direction.
+    Eigen::Vector3d dir = vertex_->estimate().normalized();
+    geometry_msgs::msg::Point start, end;
+    start.x = anchor_.x();
+    start.y = anchor_.y();
+    start.z = anchor_.z();
+    end.x = anchor_.x() + dir.x();
+    end.y = anchor_.y() + dir.y();
+    end.z = anchor_.z() + dir.z();
+    node_marker_msg.points.push_back(start);
+    node_marker_msg.points.push_back(end);
+    node_marker_msg.scale.x = 0.05;  // shaft diameter
+    node_marker_msg.scale.y = 0.1;   // head diameter
+    node_marker_msg.scale.z = 0.1;   // head length
+    Eigen::Vector4d color = getVizMarkerColor(_main);
+    node_marker_msg.color.r = color[0];
+    node_marker_msg.color.g = color[1];
+    node_marker_msg.color.b = color[2];
+    node_marker_msg.color.a = color[3];
+    return node_marker_msg;
+  }
+
+  void setFixed() override {vertex_->setFixed(true);}
+  Eigen::Vector3d getDirection() {return vertex_->estimate();}
+  void setAnchor(const Eigen::Vector3d & _anchor) {anchor_ = _anchor;}
+  void setCovariance(const Eigen::MatrixXd & _cov_matrix) {cov_matrix_ = _cov_matrix;}
+  Eigen::MatrixXd getCovariance() {return cov_matrix_;}
+
+protected:
+  std::string getNodeName() override {return node_name_;}
+  std::string getVizMarkerNamespace() override
+  {
+    return element_name_ + "/" + getNodeName();
+  }
+  Eigen::Vector4d getVizColor() override {return viz_color_;}
+  Eigen::Vector4d getVizMarkerColor(const bool _main) override
+  {
+    if (_main) {
+      return getVizColor();
+    } else {
+      return getVizColor() * 0.5;
+    }
+  }
+
+  g2o_custom::VertexUnitVector3 * vertex_;
+  Eigen::Vector3d anchor_ = Eigen::Vector3d::Zero();
+  std::string element_name_ = "node";
+  std::string node_name_ = "Direction";
+  Eigen::Vector4d viz_color_ = {1.0, 0.0, 1.0, 1.0};
   Eigen::MatrixXd cov_matrix_;
 };
 

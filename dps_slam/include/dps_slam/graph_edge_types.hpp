@@ -328,6 +328,90 @@ protected:
   Eigen::Vector4d viz_color_ = {1.0, 0.5, 0.0, 1.0};
 };
 
+class GraphEdgeSE3Direction : public GraphEdge
+{
+public:
+  GraphEdgeSE3Direction(
+    GraphNodeSE3 * _node1,
+    GraphNodeDirection * _node2,
+    const Eigen::Vector3d & _measurement,
+    const Eigen::MatrixXd & _information_matrix)
+  {
+    if (_information_matrix.size() == 0) {
+      WARN("Information Matrix Empty");
+    }
+    edge_ = new g2o_custom::EdgeSE3Direction();
+    edge_->setMeasurement(_measurement.normalized());
+    edge_->setInformation(_information_matrix);
+    edge_->vertices()[0] = _node1->getVertexSE3();
+    edge_->vertices()[1] = _node2->getVertexDirection();
+  }
+  ~GraphEdgeSE3Direction() {}
+
+  g2o::HyperGraph::Edge * getEdge() override
+  {
+    return static_cast<g2o::HyperGraph::Edge *>(edge_);
+  }
+
+  g2o_custom::EdgeSE3Direction * getEdgeSE3Direction() {return edge_;}
+
+  visualization_msgs::msg::Marker getVizMarker(const bool _main) override
+  {
+    // A direction landmark has no position; draw the estimated direction as a short
+    // arrow anchored at the robot pose so the edge is visible.
+    visualization_msgs::msg::Marker edge_marker_msg;
+    edge_marker_msg.type = visualization_msgs::msg::Marker::ARROW;
+    edge_marker_msg.ns = getVizMarkerNamespace();
+    edge_marker_msg.id = edge_->id();
+    edge_marker_msg.scale.x = 0.02;  // shaft diameter
+    edge_marker_msg.scale.y = 0.05;  // head diameter
+    edge_marker_msg.scale.z = 0.05;  // head length
+    Eigen::Vector4d color = getVizMarkerColor(_main);
+    edge_marker_msg.color.r = color[0];
+    edge_marker_msg.color.g = color[1];
+    edge_marker_msg.color.b = color[2];
+    edge_marker_msg.color.a = color[3];
+
+    g2o::VertexSE3 * node_se3 = dynamic_cast<g2o::VertexSE3 *>(getEdge()->vertices()[0]);
+    auto * node_dir = dynamic_cast<g2o_custom::VertexUnitVector3 *>(getEdge()->vertices()[1]);
+    if (!node_se3) {DEBUG("Node SE3 not found");}
+    if (!node_dir) {DEBUG("Node Direction not found");}
+    Eigen::Vector3d origin = node_se3->estimate().translation();
+    Eigen::Vector3d dir = node_dir->estimate().normalized();
+    geometry_msgs::msg::Point start, end;
+    start.x = origin.x();
+    start.y = origin.y();
+    start.z = origin.z();
+    end.x = origin.x() + dir.x();
+    end.y = origin.y() + dir.y();
+    end.z = origin.z() + dir.z();
+    edge_marker_msg.points.push_back(start);
+    edge_marker_msg.points.push_back(end);
+    return edge_marker_msg;
+  }
+
+protected:
+  std::string getEdgeName() override {return edge_name_;}
+  std::string getVizMarkerNamespace() override
+  {
+    return element_name_ + "/" + getEdgeName();
+  }
+  Eigen::Vector4d getVizColor() override {return viz_color_;}
+  Eigen::Vector4d getVizMarkerColor(const bool _main) override
+  {
+    if (_main) {
+      return getVizColor();
+    } else {
+      return getVizColor() * 0.5;
+    }
+  }
+
+  g2o_custom::EdgeSE3Direction * edge_;
+  std::string element_name_ = "edge";
+  std::string edge_name_ = "Direction";
+  Eigen::Vector4d viz_color_ = {1.0, 0.0, 1.0, 1.0};
+};
+
 class ArucoEdge : public GraphEdgeSE3
 {
 public:

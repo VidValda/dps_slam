@@ -40,8 +40,13 @@
 #ifndef G2O__EDGE_TYPES_HPP_
 #define G2O__EDGE_TYPES_HPP_
 
+#include <cmath>
+#include <istream>
+#include <ostream>
+
 #include <Eigen/Core>
 #include "g2o/core/base_binary_edge.h"
+#include "g2o/core/base_vertex.h"
 #include "g2o/types/slam3d/vertex_se3.h"
 #include "g2o/types/slam3d/vertex_pointxyz.h"
 #include "g2o/types/slam3d_addons/vertex_plane.h"
@@ -52,6 +57,48 @@ Eigen::Matrix3d skewSymmetric(const Eigen::Vector3d & v);
 
 namespace g2o_custom
 {
+
+// Unit-vector landmark living on the 2-sphere S^2. The estimate is a 3D unit
+// vector (a direction, e.g. a cylinder's axis); the internal DOF is 2 (the
+// tangent plane at the current estimate). oplus retracts a 2D tangent update
+// back onto the sphere, keeping the estimate normalized.
+class VertexUnitVector3 : public g2o::BaseVertex<2, Eigen::Vector3d>
+{
+public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  VertexUnitVector3() {}
+
+  void setToOriginImpl() override
+  {
+    _estimate = Eigen::Vector3d(0.0, 0.0, 1.0);
+  }
+
+  void oplusImpl(const double * update) override
+  {
+    const Eigen::Vector3d v = _estimate.normalized();
+    // Build an orthonormal basis of the tangent plane at v.
+    const Eigen::Vector3d ref =
+      (std::abs(v.z()) < 0.9) ? Eigen::Vector3d::UnitZ() : Eigen::Vector3d::UnitX();
+    const Eigen::Vector3d b1 = (ref - ref.dot(v) * v).normalized();
+    const Eigen::Vector3d b2 = v.cross(b1);
+    const Eigen::Vector3d updated = v + update[0] * b1 + update[1] * b2;
+    _estimate = updated.normalized();
+  }
+
+  bool read(std::istream & is) override
+  {
+    for (int i = 0; i < 3; ++i) {is >> _estimate[i];}
+    _estimate.normalize();
+    return true;
+  }
+
+  bool write(std::ostream & os) const override
+  {
+    for (int i = 0; i < 3; ++i) {os << _estimate[i] << " ";}
+    return os.good();
+  }
+};
 
 class EdgeSE3Point3D : public g2o::BaseBinaryEdge<3, Eigen::Vector3d, g2o::VertexSE3,
     g2o::VertexPointXYZ>
@@ -161,6 +208,43 @@ public:
   {
     Eigen::Vector4d v = _measurement.toVector();
     for (int i = 0; i < 4; ++i) {os << v[i] << " ";}
+    return os.good();
+  }
+};
+
+// Binary edge constraining a robot SE3 pose to a direction (unit-vector) landmark.
+// The measurement is the direction observed in the robot frame; the landmark stores
+// the direction in the map frame. The error is the difference between the landmark
+// direction predicted in the robot frame and the measured direction. Jacobians are
+// left to g2o's numeric differentiation.
+class EdgeSE3Direction : public g2o::BaseBinaryEdge<3, Eigen::Vector3d, g2o::VertexSE3,
+    VertexUnitVector3>
+{
+public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  EdgeSE3Direction() {}
+
+  void computeError() override
+  {
+    const g2o::VertexSE3 * se3 = static_cast<const g2o::VertexSE3 *>(_vertices[0]);
+    const VertexUnitVector3 * dir = static_cast<const VertexUnitVector3 *>(_vertices[1]);
+
+    // Predict the landmark direction in the robot frame (rotation only).
+    Eigen::Vector3d predicted = se3->estimate().rotation().transpose() * dir->estimate();
+    _error = predicted.normalized() - _measurement.normalized();
+  }
+
+  bool read(std::istream & is) override
+  {
+    for (int i = 0; i < 3; ++i) {is >> _measurement[i];}
+    _measurement.normalize();
+    return true;
+  }
+
+  bool write(std::ostream & os) const override
+  {
+    for (int i = 0; i < 3; ++i) {os << _measurement[i] << " ";}
     return os.good();
   }
 };

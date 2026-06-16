@@ -353,8 +353,10 @@ void SemanticSlam::detectionsCallback(
       case dps_slam_msgs::msg::Geometry::LINE:
         processLineDetection(detection, msg->header, detection_odometry_info);
         break;
-      case dps_slam_msgs::msg::Geometry::VECTOR:
       case dps_slam_msgs::msg::Geometry::CYLINDER:
+        processCylinderDetection(detection, msg->header, detection_odometry_info);
+        break;
+      case dps_slam_msgs::msg::Geometry::VECTOR:
         WARN("Detection geometry not yet supported by the backend: "
           << static_cast<int>(detection.geometry.type));
         break;
@@ -419,6 +421,68 @@ void SemanticSlam::processPointDetection(
   }
 
   optimizer_ptr_->handleNewObjectDetection(point_object, _detection_odometry_info);
+}
+
+void SemanticSlam::processCylinderDetection(
+  const dps_slam_msgs::msg::DetectionWithID _msg,
+  const std_msgs::msg::Header _header,
+  const OdometryInfo _detection_odometry_info)
+{
+  std::string base_id = _msg.id;
+  std::string object_type = _msg.label.empty() ? force_object_type_ : _msg.label;
+  if (object_type != "cylinder") {
+    ERROR("Unknown cylinder object type: " << object_type);
+    return;
+  }
+
+  // Center pose (+Z = axis), expressed in the robot frame after TF resolution.
+  Eigen::Isometry3d cyl_pose = generatePoseFromMsg(_msg.geometry.cylinder.pose.pose, _header);
+  Eigen::Vector3d center = cyl_pose.translation();
+  Eigen::Vector3d axis = (cyl_pose.rotation() * Eigen::Vector3d::UnitZ()).normalized();
+  double height = _msg.geometry.cylinder.height;
+
+  // The detector's axis sign is arbitrary (PCA). Orient it "up" (robot +Z ~ world up)
+  // so the top point and the direction landmark stay consistent across sightings.
+  if (axis.z() < 0.0) {axis = -axis;}
+
+  // Use the TOP end of the cylinder as the point landmark: it is a stable, repeatable
+  // physical feature, unlike the centroid (whose along-axis position drifts with how
+  // much of the column is observed).
+  Eigen::Vector3d top_point = center + 0.5 * height * axis;
+
+  // Covariance: mirror the point handler. The bridge sends zero covariance, so this
+  // falls back to the configured factor (optionally scaled by range).
+  Eigen::Matrix3d point_covariance;
+  if (detection_covariance_by_distance_) {
+    point_covariance = Eigen::Matrix3d::Identity() * top_point.norm();
+  } else if (detection_covariance_by_distance2_) {
+    double distance = top_point.norm();
+    point_covariance = Eigen::Matrix3d::Identity() * distance * distance;
+  } else {
+    point_covariance = Eigen::Matrix3d::Identity() * detection_covariance_factor_;
+  }
+  Eigen::Matrix3d direction_covariance = Eigen::Matrix3d::Identity() * detection_covariance_factor_;
+
+  bool detections_are_absolute = false;
+
+  if (csv_logger_) {
+    csv_logger_->logDetection(
+      _header.stamp.sec, _header.stamp.nanosec,
+      base_id, object_type, top_point,
+      _detection_odometry_info.odom_ref.translation(), detections_are_absolute);
+  }
+
+  // Top-point landmark (reuses the gate/point backend).
+  ObjectDetection * top_object = new GateDetection(
+    base_id, top_point, point_covariance, detections_are_absolute);
+  optimizer_ptr_->handleNewObjectDetection(top_object, _detection_odometry_info);
+
+  // Axis-direction landmark. A distinct id keeps it a separate node associated to the
+  // same physical cylinder. The world-frame top point is passed as the viz anchor.
+  Eigen::Vector3d anchor_world = _detection_odometry_info.map_ref * top_point;
+  ObjectDetection * axis_object = new ObjectDetectionDirection(
+    base_id + "__axis", axis, direction_covariance, detections_are_absolute, anchor_world);
+  optimizer_ptr_->handleNewObjectDetection(axis_object, _detection_odometry_info);
 }
 
 void SemanticSlam::processPoseDetection(
