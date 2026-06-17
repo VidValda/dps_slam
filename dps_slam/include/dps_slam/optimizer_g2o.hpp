@@ -83,7 +83,7 @@ public:
   void setCsvLogger(CsvLogger * logger) { csv_logger_ = logger; }
   std::shared_ptr<GraphG2O> main_graph;
   std::shared_ptr<GraphG2O> temp_graph;
-  std::mutex graph_mutex_;
+  std::recursive_mutex graph_mutex_;
   void setParameters(const OptimizerG2OParameters & _params);
   Eigen::Isometry3d getOptimizedPose();
   Eigen::Isometry3d getOptimizedMapPose();
@@ -121,6 +121,15 @@ private:
   double map_odom_transform_alpha_ = 1.0;
   OdometryWithCovariance last_odometry_added_;
   OdometryWithCovariance last_detection_odometry_added_;
+  // Reference keyframe (last one carrying its detections) used to compute the
+  // map->odom correction; see handleNewOdom / updateOdomMapTransform.
+  OdomNode * map_odom_ref_node_ = nullptr;
+  OdometryWithCovariance map_odom_ref_odom_;
+  // Min detection edges a keyframe needs before it may serve as the map->odom
+  // reference (Option A): avoids reading the correction off an under-constrained node.
+  int map_odom_ref_min_detections_ = 3;
+  // Instrumentation: keyframes elapsed since the map->odom reference last updated.
+  int kf_since_ref_update_ = 0;
   Eigen::Isometry3d map_odom_tranform_;
   Eigen::Isometry3d earth_map_transform_;
   Eigen::Isometry3d initial_earth_to_map_transform_;

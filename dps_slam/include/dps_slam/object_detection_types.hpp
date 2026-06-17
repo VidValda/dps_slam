@@ -100,7 +100,9 @@ public:
       node_estimation_ = measured_pose_;
 
     } else {
-      edge_measurement_ = measured_pose_;
+      // Re-express the detection (taken at detection time) in the keyframe frame the
+      // edge attaches to, using the keyframe->detection relative motion (increment).
+      edge_measurement_ = _detection_odometry.increment * measured_pose_;
       node_estimation_ = _detection_odometry.map_ref * measured_pose_;
     }
     // INFO(PRINT_VAR(_detection_odometry.odom_ref.translation().transpose()));
@@ -133,13 +135,15 @@ public:
       node_estimation_ = measured_position_;
 
     } else {
-      edge_measurement_ = measured_position_;
+      // The detection is measured from the robot pose at DETECTION time, but the
+      // edge attaches to the last keyframe (the node `last_odom_node_`). Re-express
+      // the measurement in the keyframe frame using the keyframe->detection relative
+      // motion (`increment`); otherwise the per-detection time offset makes the
+      // constraints mutually inconsistent (no zero-residual solution even with
+      // perfect data) and the optimised trajectory drifts.
+      edge_measurement_ = _detection_odometry.increment * measured_position_;
       node_estimation_ = _detection_odometry.map_ref * measured_position_;
     }
-    // INFO(PRINT_VAR(_detection_odometry.odom_ref.translation().transpose()));
-    // INFO(PRINT_VAR(_detection_odometry.map_ref.translation().transpose()));
-    // INFO(PRINT_VAR(edge_measurement_.transpose()));
-    // INFO(PRINT_VAR(node_estimation_.transpose()));
     return true;
   }
 
@@ -269,7 +273,9 @@ public:
       edge_measurement_ = _detection_odometry.odom_ref.rotation().inverse() * measured_direction_;
       node_estimation_ = measured_direction_;
     } else {
-      edge_measurement_ = measured_direction_;
+      // Rotate the measured direction into the keyframe frame (see the point
+      // detection: the edge attaches to the keyframe, not the detection-time pose).
+      edge_measurement_ = _detection_odometry.increment.rotation() * measured_direction_;
       node_estimation_ = _detection_odometry.map_ref.rotation() * measured_direction_;
     }
     edge_measurement_.normalize();

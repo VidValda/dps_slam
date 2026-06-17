@@ -140,8 +140,25 @@ target_link_libraries(${PROJECT_NAME}_node
                       ${FMT_LIBRARIES}
 )
 
+# Standalone minimal g2o reproduction (isolated optimizer diagnostic). Links the real
+# dps_slam optimizer/graph sources so it can drive the actual OptimizerG2O.
+add_executable(test_g2o_repro
+  src/test_g2o_repro.cpp
+  src/optimizer_g2o.cpp
+  src/graph_g2o.cpp
+  src/g2o_edge_types.cpp
+  src/conversions.cpp)
+target_include_directories(test_g2o_repro PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+ament_target_dependencies(test_g2o_repro ${PROJECT_DEPENDENCIES})
+target_link_libraries(test_g2o_repro
+  glog::glog ${G2O_TYPES_DATA} ${G2O_CORE_LIBRARY} ${G2O_STUFF_LIBRARY}
+  ${G2O_SOLVER_PCG} ${G2O_SOLVER_CSPARSE} ${G2O_SOLVER_CHOLMOD}
+  ${G2O_TYPES_SLAM3D} ${G2O_TYPES_SLAM3D_ADDONS} ${FMT_LIBRARIES})
+
 install(TARGETS
   ${PROJECT_NAME}_node
+  test_g2o_repro
   DESTINATION lib/${PROJECT_NAME})
 
 # For each plugin, install config files

@@ -122,6 +122,11 @@ SemanticSlam::SemanticSlam(rclcpp::NodeOptions & options)
 
 
 // ROS2
+  // Odometry stays in the node's DEFAULT callback group, separate from the detections
+  // group below. This is deliberate: the detection callback blocks on
+  // lookupTransform(..., 1.0s); if odom shared that group it would be starved during the
+  // TF wait under the MultiThreadedExecutor -> dropped odometry -> divergence. The graph
+  // mutex (taken inside both callbacks) already serializes the actual graph mutations.
   if (!odometry_topic.empty()) {
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       odometry_topic, sensor_qos,
@@ -183,12 +188,21 @@ SemanticSlam::SemanticSlam(rclcpp::NodeOptions & options)
     tf_publish_timer_ = this->create_timer(
       std::chrono::duration<double>(1.0 / 100.0),
       [this]() {
-        optimizer_ptr_->updateOdomMapTransform();
+        // Re-broadcast the latest map->odom / earth->map with a fresh stamp. We do
+        // NOT recompute updateOdomMapTransform() here (it reads vertex estimates that
+        // optimize() is mutating). Crucially we ALSO take the graph mutex while READING
+        // map_odom_tranform_ / earth_map_transform_: handleNewOdom writes them under the
+        // mutex, so without this the 100 Hz timer tears those reads and broadcasts a
+        // garbage transform -- which is exactly what made the *live* pose diverge while
+        // the identical recorded data replays cleanly single-threaded.
         std_msgs::msg::Header header;
         header.stamp = this->now();
-        updateMapOdomTransform(header);
+        {
+          std::lock_guard<std::recursive_mutex> lock(optimizer_ptr_->graph_mutex_);
+          updateMapOdomTransform(header);
+          updateEarthMapTransform(header);
+        }
         tf_broadcaster_->sendTransform(map_odom_transform_msg_);
-        updateEarthMapTransform(header);
         tf_broadcaster_->sendTransform(earth_map_transform_msg_);
       },
     tf_callback_group_);
@@ -323,7 +337,15 @@ void SemanticSlam::detectionsCallback(
     RCLCPP_INFO(
       this->get_logger(), "Could not transform %s to %s: %s", odom_frame_.c_str(),
       robot_frame_.c_str(), ex.what());
+    return;  // without a valid detection-time odometry we cannot anchor the detection
   }
+
+  // Process this detection batch atomically w.r.t. keyframe creation (handleNewOdom
+  // runs on another executor thread). generateDetectionOdometryInfo + the per-detection
+  // edge insertions below must see a consistent last_odom_node_ / last_odometry_added_,
+  // otherwise a detection's `increment` is attached to the wrong keyframe. The mutex is
+  // recursive, so the locks inside handleNewObjectDetection re-enter fine.
+  std::lock_guard<std::recursive_mutex> det_lock(optimizer_ptr_->graph_mutex_);
 
   // DEBUG_START_TIMER
   OdometryInfo detection_odometry_info;

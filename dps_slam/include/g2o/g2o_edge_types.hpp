@@ -98,6 +98,23 @@ public:
     for (int i = 0; i < 3; ++i) {os << _estimate[i] << " ";}
     return os.good();
   }
+
+  // External estimate representation (the 3D unit vector). Needed so the optimizer's
+  // snapshot/restore (get/setEstimateData) can handle this vertex; the base class
+  // otherwise reports estimateDimension() == -1.
+  int estimateDimension() const override {return 3;}
+
+  bool getEstimateData(double * est) const override
+  {
+    est[0] = _estimate[0]; est[1] = _estimate[1]; est[2] = _estimate[2];
+    return true;
+  }
+
+  bool setEstimateDataImpl(const double * est) override
+  {
+    _estimate = Eigen::Vector3d(est[0], est[1], est[2]).normalized();
+    return true;
+  }
 };
 
 class EdgeSE3Point3D : public g2o::BaseBinaryEdge<3, Eigen::Vector3d, g2o::VertexSE3,

@@ -148,6 +148,37 @@ bool OptimizerG2O::handleNewOdom(
   // if (!checkAddingConditions(new_odometry_info, main_graph_odometry_distance_threshold_)) {
   //   return false;
   // }
+  // Serialize this entire keyframe-insertion + optimize against the detection callback
+  // (which runs on a separate executor thread and also locks graph_mutex_). Otherwise
+  // the two interleave on the shared last_odom_node_ / last_odometry_added_ state and a
+  // detection's `increment` gets attached to the wrong keyframe -> corrupt edge ->
+  // intermittent divergence. recursive_mutex so the finer-grained locks below re-enter.
+  std::lock_guard<std::recursive_mutex> handle_lock(graph_mutex_);
+
+  // Reference for the map->odom correction (Option A): only promote the current last
+  // keyframe to be the reference if it accumulated ENOUGH detection constraints this
+  // interval. By now it has its detection edges and this cycle's optimize() will
+  // correct it. A keyframe with too few detections is an under-constrained, nearly
+  // free-floating node: reading map->odom off it makes the live pose jump. In that
+  // case we keep the previous well-constrained reference. (The brand-new keyframe
+  // added just below never has detections yet, so it must never be the reference.)
+  size_t det_count;
+  {
+    std::lock_guard<std::recursive_mutex> lock(graph_mutex_);
+    det_count = detections_since_last_keyframe_.size();
+  }
+  if (static_cast<int>(det_count) >= map_odom_ref_min_detections_) {
+    map_odom_ref_node_ = main_graph->getLastOdomNode();
+    map_odom_ref_odom_.odometry = last_odometry_added_.odometry;
+    WARN("[MAPODOMREF] updated: stale_for=" << kf_since_ref_update_ <<
+      " keyframes, det_count=" << det_count);
+    kf_since_ref_update_ = 0;
+  } else {
+    kf_since_ref_update_++;
+    WARN("[MAPODOMREF] NOT updated (det_count=" << det_count <<
+      " < " << map_odom_ref_min_detections_ << "), stale_for=" << kf_since_ref_update_);
+  }
+
   last_odometry_added_.odometry = new_odometry_info.odom_ref;
   last_odometry_added_.covariance = _new_odometry.covariance;
 
@@ -159,13 +190,17 @@ bool OptimizerG2O::handleNewOdom(
     return false;
   }
 
-  main_graph->addNewKeyframe(
-    new_odometry_info.map_ref, new_odometry_info.increment,
-    new_odometry_info.covariance_matrix);
-
-  if (!use_dual_graph_) {
-    std::lock_guard<std::mutex> lock(graph_mutex_);
-    detections_since_last_keyframe_.clear();
+  {
+    // Hold the graph mutex while mutating the graph: under the MultiThreadedExecutor
+    // a concurrent detection callback (separate callback group, also locks
+    // graph_mutex_) must not insert vertices/edges at the same time.
+    std::lock_guard<std::recursive_mutex> lock(graph_mutex_);
+    main_graph->addNewKeyframe(
+      new_odometry_info.map_ref, new_odometry_info.increment,
+      new_odometry_info.covariance_matrix);
+    if (!use_dual_graph_) {
+      detections_since_last_keyframe_.clear();
+    }
   }
 
   if (use_dual_graph_) {
@@ -280,6 +315,11 @@ bool OptimizerG2O::handleNewOdom(
   graph_mutex_.unlock();
   } // use_dual_graph_
 
+  // Optimize and read back the corrected poses under the graph mutex: optimize()
+  // mutates every vertex estimate, so it must not run while a detection callback is
+  // inserting into the graph -- that race is what corrupts the solve (a clean
+  // single-threaded batch of this exact graph recovers ground truth perfectly).
+  graph_mutex_.lock();
   double chi2_before = main_graph->graph_->chi2();
   auto opt_start = std::chrono::steady_clock::now();
   main_graph->optimizeGraph();
@@ -290,6 +330,7 @@ bool OptimizerG2O::handleNewOdom(
   if (generate_odom_map_transform_) {
     updateOdomMapTransform();
   }
+  graph_mutex_.unlock();
 
   int temp_nodes = 0, temp_edges = 0;
   if (use_dual_graph_ && temp_graph) {
@@ -335,7 +376,7 @@ bool OptimizerG2O::checkAddingNewDetection(
 {
 
   // graph_mutex_.lock();
-  std::lock_guard<std::mutex> lock(graph_mutex_);
+  std::lock_guard<std::recursive_mutex> lock(graph_mutex_);
   if (temp_graph == nullptr) {
     ERROR("Temp graph is null");
     return false;
@@ -383,11 +424,11 @@ void OptimizerG2O::handleNewObjectDetection(
   }
 
   if (use_dual_graph_) {
-    std::lock_guard<std::mutex> lock(graph_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(graph_mutex_);
     if (!temp_graph_generated_) { return; }
     temp_graph->addNewObjectDetection(_object);
   } else {
-    std::lock_guard<std::mutex> lock(graph_mutex_);
+    std::lock_guard<std::recursive_mutex> lock(graph_mutex_);
     std::string id = _object->getId();
     if (detections_since_last_keyframe_.count(id) > 0) { return; }
     detections_since_last_keyframe_.insert(id);
@@ -431,9 +472,15 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
 
   main_graph->setMapNode(main_graph->getLastOdomNode());
 
-  // last_odometry_added_.odometry = earth_to_map_transform_;
-  // last_odometry_added_.covariance = Eigen::MatrixXd::Zero(6, 6);
-  //
+  // Initialise the "previous odometry" so the FIRST odometry increment is well
+  // defined. OdometryWithCovariance holds a default-constructed Eigen::Isometry3d
+  // (uninitialised coefficients); leaving it as-is makes the first increment
+  // garbage/NaN and poisons the graph's chi2 from the start. Identity makes the
+  // first increment equal to the first absolute odometry pose, which is exactly
+  // how the first keyframe (at earth_to_map^-1 * odom) is anchored to the map node.
+  last_odometry_added_.odometry = Eigen::Isometry3d::Identity();
+  last_odometry_added_.covariance = Eigen::MatrixXd::Identity(6, 6) * 1e-6;
+
   main_graph->setFixedObjects(fixed_objects_);
 }
 
@@ -441,11 +488,22 @@ void OptimizerG2O::updateOdomMapTransform()
 {
   earth_map_transform_ = getOptimizedMapPose();
 
-  Eigen::Isometry3d new_map_odom_tranform = earth_map_transform_.inverse() * getOptimizedPose() * last_odometry_added_.odometry.inverse();
+  // Use the last keyframe that actually carries its detections (captured in
+  // handleNewOdom) rather than the freshly-added detection-less one, otherwise the
+  // optimised pose equals the raw odometry and the correction collapses to identity.
+  Eigen::Isometry3d ref_pose = (map_odom_ref_node_ != nullptr)
+    ? map_odom_ref_node_->getPose() : getOptimizedPose();
+  Eigen::Isometry3d ref_odom = (map_odom_ref_node_ != nullptr)
+    ? map_odom_ref_odom_.odometry : last_odometry_added_.odometry;
+
+  Eigen::Isometry3d new_map_odom_tranform =
+    earth_map_transform_.inverse() * ref_pose * ref_odom.inverse();
   // Eigen::Isometry3d map_odom_diff = new_map_odom_tranform.inverse() * map_odom_tranform_;
   // if (map_odom_diff.translation().norm() > map_odom_security_threshold_) {
   //   WARN("Big Map-Odom transform difference: " << map_odom_diff.translation().norm());
   // }
+  double jump = (new_map_odom_tranform.inverse() * map_odom_tranform_).translation().norm();
+  WARN("[MAPODOM] jump=" << jump * 100.0 << " cm  ref_stale_for=" << kf_since_ref_update_ << " kf");
   if (map_odom_transform_alpha_ < 1.0) {
     Eigen::Isometry3d filtered_map_odom_transform = filterTransform(map_odom_tranform_, new_map_odom_tranform);
     map_odom_tranform_ = filtered_map_odom_transform;

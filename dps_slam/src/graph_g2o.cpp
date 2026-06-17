@@ -104,6 +104,13 @@ OdomNode * GraphG2O::getMapNode() {return map_node_;}
 void GraphG2O::setMapNode(OdomNode * _map_node)
 {
   map_node_ = _map_node;
+  // Anchor the graph: fixing the map node removes the 6-DOF gauge freedom of the
+  // pose graph. Without a fixed node the information matrix is singular, the
+  // CHOLMOD solve returns NaN, and the trajectory wanders in the null space
+  // (landmarks stay self-consistent while absolute poses drift away).
+  if (map_node_ != nullptr) {
+    map_node_->setFixed();
+  }
 }
 
 void GraphG2O::setFixedObjects(const std::vector<FixedObject> & _fixed_objects)
@@ -122,9 +129,10 @@ void GraphG2O::setFixedObjects(const std::vector<FixedObject> & _fixed_objects)
       // fixed_node->setCovariance(aruco_covariance);
       addNode(*fixed_node);
       obj_id2node_[object.id] = fixed_node;
-      FLAG_GRAPH("Added fixed object ID: " << object.id);
+      WARN_GRAPH("FIXEDOBJ added id=" << object.id << " type=" << object.type
+        << " at (" << object.isometry.translation().transpose() << ")");
     } else {
-      FLAG_GRAPH("Warning: Unrecognized object type: " << object.type);
+      WARN_GRAPH("FIXEDOBJ unrecognized type: " << object.type);
     }
   }
 }
@@ -161,16 +169,39 @@ bool GraphG2O::optimizeGraph()
   graph_->setVerbose(false);
 
   double chi2 = graph_->chi2();
-  if (std::isnan(chi2)) {
-    ERROR_GRAPH("GRAPH RETURNED A NAN BEFORE OPTIMIZATION");
-    // return false;
+  // Non-destructive optimization: snapshot every (non-fixed) vertex estimate,
+  // optimize, and roll back if the result is NaN or worse. We snapshot manually
+  // via get/setEstimateData rather than g2o's push()/pop(): the latter mishandles
+  // vertices added this round, resetting them to the origin on pop() and poisoning
+  // the graph with huge spurious residuals.
+  std::vector<g2o::OptimizableGraph::Vertex *> snap_vertices;
+  std::vector<std::vector<double>> snap_estimates;
+  for (auto & kv : graph_->vertices()) {
+    auto * v = dynamic_cast<g2o::OptimizableGraph::Vertex *>(kv.second);
+    if (v == nullptr || v->fixed()) {continue;}
+    int dim = v->estimateDimension();
+    if (dim <= 0) {continue;}   // vertex doesn't support get/setEstimateData; skip it
+    std::vector<double> data(static_cast<size_t>(dim));
+    if (v->getEstimateData(data.data())) {
+      snap_vertices.push_back(v);
+      snap_estimates.push_back(std::move(data));
+    }
   }
-  // std::cout << "Start optimization" << std::endl;
-  graph_->optimize(num_iterations);
-  // int iterations = graph_->optimize(num_iterations);
-  // FLAG_GRAPH("Optimization done");
-  // std::cout << "iterations: " << iterations << " / " << num_iterations << std::endl;
-  // std::cout << "chi2: (before)" << chi2 << " -> (after)" << graph->chi2() << std::endl;
+  int iterations = graph_->optimize(num_iterations);
+  double chi2_after = graph_->chi2();
+  // Roll back ONLY on NaN. An earlier version also vetoed any chi2 increase, but that
+  // rejected the legitimate drift corrections (moving keyframes onto the landmarks
+  // necessarily raises the odometry-edge residuals, so total chi2 can tick up on the
+  // step that actually fixes the trajectory) -> the live pose never converged. The
+  // optimizer itself does not diverge here (verified by the standalone reproduction),
+  // so the NaN guard is all that's needed.
+  const bool rejected = std::isnan(chi2_after);
+  if (rejected) {
+    for (size_t i = 0; i < snap_vertices.size(); ++i) {
+      snap_vertices[i]->setEstimateData(snap_estimates[i].data());
+    }
+  }
+  (void)iterations;
   if (std::isnan(graph_->chi2())) {
     // FIXME(dps): If temp graph, reset
     // throw std::invalid_argument("GRAPH RETURNED A NAN...STOPPING THE EXPERIMENT");
@@ -223,15 +254,17 @@ void GraphG2O::addNewKeyframe(
   OdomNode * odom_node(new OdomNode(_absolute_pose));
   addNode(*odom_node);
 
-  Eigen::MatrixXd information_matrix = _relative_covariance.inverse();
-  OdomEdge * odom_edge(new OdomEdge(
-      last_odom_node_, odom_node, _relative_pose,
-      information_matrix));
-  if (odom_edge == nullptr) {
-    ERROR_GRAPH("Odom edge is null");
-    return;
+  // The very first keyframe has no predecessor: building an OdomEdge with a null
+  // node1 leaves the wrapped g2o edge uninitialised but still gets added to the
+  // graph, which poisons chi2 with NaN. Only add the odometry edge once we have a
+  // previous node to connect from.
+  if (last_odom_node_ != nullptr) {
+    Eigen::MatrixXd information_matrix = _relative_covariance.inverse();
+    OdomEdge * odom_edge(new OdomEdge(
+        last_odom_node_, odom_node, _relative_pose,
+        information_matrix));
+    addEdge(*odom_edge);
   }
-  addEdge(*odom_edge);
   last_odom_node_ = odom_node;
 }
 
