@@ -148,9 +148,6 @@ bool OptimizerG2O::handleNewOdom(
   // if (!checkAddingConditions(new_odometry_info, main_graph_odometry_distance_threshold_)) {
   //   return false;
   // }
-  last_odometry_added_.odometry = new_odometry_info.odom_ref;
-  last_odometry_added_.covariance = _new_odometry.covariance;
-
   // DEBUG(new_odometry_info.covariance_matrix);
 
   // FLAG("ADDING NEW ODOMETRY TO MAIN GRAPH");
@@ -159,9 +156,18 @@ bool OptimizerG2O::handleNewOdom(
     return false;
   }
 
-  main_graph->addNewKeyframe(
-    new_odometry_info.map_ref, new_odometry_info.increment,
-    new_odometry_info.covariance_matrix);
+  {
+    // The odometry reference and the keyframe it anchors are one state:
+    // updateOdomMapTransform() pairs them to build map->odom. Publishing the
+    // reference before its keyframe exists lets that pairing straddle the two,
+    // and the transform then carries the distance flown in between.
+    std::lock_guard<std::mutex> lock(graph_mutex_);
+    last_odometry_added_.odometry = new_odometry_info.odom_ref;
+    last_odometry_added_.covariance = _new_odometry.covariance;
+    main_graph->addNewKeyframe(
+      new_odometry_info.map_ref, new_odometry_info.increment,
+      new_odometry_info.covariance_matrix);
+  }
 
   if (!use_dual_graph_) {
     std::lock_guard<std::mutex> lock(graph_mutex_);
@@ -331,11 +337,19 @@ bool OptimizerG2O::handleNewOdom(
   graph_mutex_.unlock();
   } // use_dual_graph_
 
-  double chi2_before = main_graph->graph_->chi2();
+  double chi2_before = 0.0, chi2_after = 0.0;
   auto opt_start = std::chrono::steady_clock::now();
-  main_graph->optimizeGraph();
+  {
+    std::lock_guard<std::mutex> lock(graph_mutex_);
+    // chi2() sums the error vectors the edges currently hold; edges added since
+    // the last optimization hold uninitialized ones, so the errors must be
+    // computed before the value is read or the log records garbage.
+    main_graph->graph_->computeActiveErrors();
+    chi2_before = main_graph->graph_->chi2();
+    main_graph->optimizeGraph();
+    chi2_after = main_graph->graph_->chi2();
+  }
   auto opt_end = std::chrono::steady_clock::now();
-  double chi2_after = main_graph->graph_->chi2();
   double opt_ms = std::chrono::duration<double, std::milli>(opt_end - opt_start).count();
 
   if (generate_odom_map_transform_) {
@@ -349,6 +363,7 @@ bool OptimizerG2O::handleNewOdom(
   }
 
   if (csv_logger_) {
+    std::lock_guard<std::mutex> lock(graph_mutex_);
     auto optimized = getOptimizedPose();
     auto corrected = earth_map_transform_ * map_odom_tranform_ * last_odometry_added_.odometry;
     csv_logger_->logKeyframe(0, 0,
@@ -490,6 +505,11 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
 
 void OptimizerG2O::updateOdomMapTransform()
 {
+  // Runs on the 100 Hz TF timer, concurrently with the odometry callback that
+  // adds keyframes and the detection callback that optimizes the graph. Without
+  // the lock this reads node estimates while g2o is rewriting them, and pairs a
+  // keyframe pose with an odometry reference from a different instant.
+  std::lock_guard<std::mutex> lock(graph_mutex_);
   earth_map_transform_ = getOptimizedMapPose();
 
   Eigen::Isometry3d new_map_odom_tranform = earth_map_transform_.inverse() * getOptimizedPose() * last_odometry_added_.odometry.inverse();
@@ -535,11 +555,13 @@ Eigen::Isometry3d OptimizerG2O::getOptimizedMapPose()
 
 Eigen::Isometry3d OptimizerG2O::getMapOdomTransform()
 {
+  std::lock_guard<std::mutex> lock(graph_mutex_);
   return map_odom_tranform_;
 }
 
 Eigen::Isometry3d OptimizerG2O::getMapTransform()
 {
+  std::lock_guard<std::mutex> lock(graph_mutex_);
   return earth_map_transform_;
 }
 
