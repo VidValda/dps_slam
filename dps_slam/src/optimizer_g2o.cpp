@@ -126,7 +126,7 @@ bool OptimizerG2O::generateOdometryInfo(
     _odometry_info.covariance_matrix.diagonal() =
       _odometry_info.covariance_matrix.diagonal().cwiseMax(odom_covariance_floor_);
   }
-  _odometry_info.map_ref = initial_earth_to_map_transform_.inverse() * _odometry_info.odom_ref;
+  _odometry_info.map_ref = initial_earth_to_map_transform_ * _odometry_info.odom_ref;
   // _odometry_info.map_ref = earth_map_transform_ * _odometry_info.odom_ref;
   // _odometry_info.map_ref = _odometry_info.odom_ref;
 
@@ -528,8 +528,8 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   // odometry_received_.covariance(4, 4) *= 10e4;
   // odometry_received_.covariance(3, 3) *= 10e4;
 
-  main_graph->addNewKeyframe(initial_earth_to_map_transform_.inverse(),
-    initial_earth_to_map_transform_.inverse(),
+  main_graph->addNewKeyframe(initial_earth_to_map_transform_,
+    initial_earth_to_map_transform_,
     earth_to_map_covariance_);
 
   main_graph->setMapNode(main_graph->getLastOdomNode());

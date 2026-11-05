@@ -911,7 +911,7 @@ visualization_msgs::msg::MarkerArray SemanticSlam::generateVizNodesMsg(
 {
   // Vertex estimates are in map frame, not earth frame.
   bool main = false;
-  std::string viz_frame = estimated_map_frame_;
+  std::string viz_frame = earth_frame_;
   if (_graph->getName() == "Main Graph") {
     main = true;
   }
@@ -931,7 +931,7 @@ visualization_msgs::msg::MarkerArray SemanticSlam::generateVizEdgesMsg(
   std::shared_ptr<GraphG2O> & _graph)
 {
   bool main = false;
-  std::string viz_frame = estimated_map_frame_;
+  std::string viz_frame = earth_frame_;
   if (_graph->getName() == "Main Graph") {
     main = true;
   }
