@@ -75,6 +75,9 @@ struct OptimizerG2OParameters
   double odom_covariance_floor = 1e-4;
   // Std (deg) of a prior keeping every wall (plane) landmark vertical; <= 0 disables it.
   double wall_vertical_prior_std_deg = 0.0;
+  double wall_manhattan_prior_std_deg = 0.0;
+  double wall_manhattan_reference_yaw_deg = 0.0;
+  double wall_manhattan_max_deviation_deg = 10.0;
   Eigen::Isometry3d earth_to_map_transform;
   std::vector<FixedObject> fixed_objects;
 };
@@ -167,6 +170,9 @@ private:
   double robust_kernel_delta_ = 3.0;
   double odom_covariance_floor_ = 1e-4;
   double wall_vertical_prior_std_rad_ = 0.0;
+  double wall_manhattan_prior_std_rad_ = 0.0;
+  double wall_manhattan_reference_yaw_rad_ = 0.0;
+  double wall_manhattan_max_deviation_rad_ = 0.0;
   std::vector<FixedObject> fixed_objects_;
   std::unordered_set<std::string> detections_since_last_keyframe_;
   CsvLogger * csv_logger_ = nullptr;

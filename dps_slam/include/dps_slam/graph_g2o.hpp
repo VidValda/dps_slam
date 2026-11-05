@@ -111,6 +111,7 @@ public:
   // Std (rad) of a prior keeping every plane landmark added from now on vertical
   // (g2o_custom::EdgePlaneVertical); <= 0 disables it.
   void setWallVerticalPriorStd(double _std_rad);
+  void setWallManhattanPrior(double _std_rad, double _reference_yaw_rad, double _max_deviation_rad);
   std::shared_ptr<g2o::SparseOptimizer> graph_;  // g2o graph
 
   std::unordered_map<std::string, GraphNode *> obj_id2node_;
@@ -129,6 +130,9 @@ private:
   double robust_kernel_delta_ = 3.0;
   bool restrict_keyframe_height_to_odometry_ = true;
   double wall_vertical_prior_std_rad_ = 0.0;
+  double wall_manhattan_prior_std_rad_ = 0.0;
+  double wall_manhattan_reference_yaw_rad_ = 0.0;
+  double wall_manhattan_max_deviation_rad_ = 0.0;
 };
 
 #endif  // AS2_SLAM__GRAPH_G2O_HPP_

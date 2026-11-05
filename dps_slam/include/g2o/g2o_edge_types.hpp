@@ -296,6 +296,31 @@ public:
   bool write(std::ostream & os) const override {os << _measurement << " "; return os.good();}
 };
 
+// Unary prior keeping a wall on the building axes: the error is the azimuth of its normal from
+// the nearest multiple of 90 deg around the reference yaw held in the measurement.
+class EdgePlaneManhattan : public g2o::BaseUnaryEdge<1, double, g2o::VertexPlane>
+{
+public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  EdgePlaneManhattan() {setMeasurement(0.0);}
+
+  static double deviation(const Eigen::Vector3d & _normal, const double _reference_yaw)
+  {
+    const double delta = std::atan2(_normal.y(), _normal.x()) - _reference_yaw;
+    return delta - (M_PI / 2.0) * std::round(delta / (M_PI / 2.0));
+  }
+
+  void computeError() override
+  {
+    const g2o::VertexPlane * plane = static_cast<const g2o::VertexPlane *>(_vertices[0]);
+    _error[0] = deviation(plane->estimate().normal(), _measurement);
+  }
+
+  bool read(std::istream & is) override {is >> _measurement; return true;}
+  bool write(std::ostream & os) const override {os << _measurement << " "; return os.good();}
+};
+
 }  // namespace g2o_custom
 
 #endif  // G2O__EDGE_TYPES_HPP_

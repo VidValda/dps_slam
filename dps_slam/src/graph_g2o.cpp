@@ -263,6 +263,14 @@ void GraphG2O::setRestrictKeyframeHeightToOdometry(bool _restrict)
   restrict_keyframe_height_to_odometry_ = _restrict;
 }
 
+void GraphG2O::setWallManhattanPrior(
+  double _std_rad, double _reference_yaw_rad, double _max_deviation_rad)
+{
+  wall_manhattan_prior_std_rad_ = _std_rad;
+  wall_manhattan_reference_yaw_rad_ = _reference_yaw_rad;
+  wall_manhattan_max_deviation_rad_ = _max_deviation_rad;
+}
+
 void GraphG2O::setWallVerticalPriorStd(double _std_rad)
 {
   wall_vertical_prior_std_rad_ = _std_rad;
@@ -361,6 +369,22 @@ void GraphG2O::addNewObjectDetection(
       information(0, 0) = 1.0 / (wall_vertical_prior_std_rad_ * wall_vertical_prior_std_rad_);
       vertical->setInformation(information);
       graph_->addEdge(vertical);
+    }
+    // Keep the wall on the building axes, unless it was first seen too far from them.
+    if (new_plane && wall_manhattan_prior_std_rad_ > 0.0 &&
+      std::abs(
+        g2o_custom::EdgePlaneManhattan::deviation(
+          new_plane->getPlane().normal(), wall_manhattan_reference_yaw_rad_)) <
+      wall_manhattan_max_deviation_rad_)
+    {
+      auto * manhattan = new g2o_custom::EdgePlaneManhattan();
+      manhattan->setId(n_edges_++);
+      manhattan->setVertex(0, new_plane->getVertexPlane());
+      manhattan->setMeasurement(wall_manhattan_reference_yaw_rad_);
+      Eigen::Matrix<double, 1, 1> information;
+      information(0, 0) = 1.0 / (wall_manhattan_prior_std_rad_ * wall_manhattan_prior_std_rad_);
+      manhattan->setInformation(information);
+      graph_->addEdge(manhattan);
     }
   } else {
     // Already known: grow a plane's drawn extent with this observation's, so it covers

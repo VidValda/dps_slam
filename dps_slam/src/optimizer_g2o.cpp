@@ -504,7 +504,13 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   wall_vertical_prior_std_rad_ = _params.wall_vertical_prior_std_deg * M_PI / 180.0;
   main_graph->setRobustKernelDelta(robust_kernel_delta_);
   main_graph->setRestrictKeyframeHeightToOdometry(restrict_map_odom_correction_to_xy_yaw_);
+  wall_manhattan_prior_std_rad_ = _params.wall_manhattan_prior_std_deg * M_PI / 180.0;
+  wall_manhattan_reference_yaw_rad_ = _params.wall_manhattan_reference_yaw_deg * M_PI / 180.0;
+  wall_manhattan_max_deviation_rad_ = _params.wall_manhattan_max_deviation_deg * M_PI / 180.0;
   main_graph->setWallVerticalPriorStd(wall_vertical_prior_std_rad_);
+  main_graph->setWallManhattanPrior(
+    wall_manhattan_prior_std_rad_, wall_manhattan_reference_yaw_rad_,
+    wall_manhattan_max_deviation_rad_);
   if (temp_graph) {
     temp_graph->setRobustKernelDelta(robust_kernel_delta_);
     temp_graph->setRestrictKeyframeHeightToOdometry(restrict_map_odom_correction_to_xy_yaw_);

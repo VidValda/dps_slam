@@ -1014,6 +1014,13 @@ OptimizerG2OParameters SemanticSlam::getOptimizerParameters() {
       this->get_parameter("wall_vertical_prior_std_deg").as_double();
   }
 
+  this->get_parameter_or(
+    "wall_manhattan_prior_std_deg", optimizer_params.wall_manhattan_prior_std_deg, 0.0);
+  this->get_parameter_or(
+    "wall_manhattan_reference_yaw_deg", optimizer_params.wall_manhattan_reference_yaw_deg, 0.0);
+  this->get_parameter_or(
+    "wall_manhattan_max_deviation_deg", optimizer_params.wall_manhattan_max_deviation_deg, 10.0);
+
   double earth_to_map_x = 0.0;
   double earth_to_map_y = 0.0;
   double earth_to_map_z = 0.0;
