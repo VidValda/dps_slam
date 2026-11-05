@@ -130,7 +130,7 @@ public:
   bool prepareMeasurements(const OdometryInfo & _detection_odometry) override
   {
     if (detections_are_absolute_) {
-      edge_measurement_ = _detection_odometry.odom_ref.inverse() * measured_position_;
+      edge_measurement_ = _detection_odometry.map_ref.inverse() * measured_position_;
       node_estimation_ = measured_position_;
 
     } else {
@@ -229,7 +229,7 @@ public:
     if (detections_are_absolute_) {
       // Measured state already in the world/map frame; express the edge
       // measurement in the reference keyframe's frame.
-      const Eigen::Isometry3d odom_inv = _detection_odometry.odom_ref.inverse();
+      const Eigen::Isometry3d odom_inv = _detection_odometry.map_ref.inverse();
       edge_measurement_.head<3>() = odom_inv * measured_state_.head<3>();
       edge_measurement_.tail<3>() =
         (odom_inv.rotation() * measured_state_.tail<3>()).normalized();
@@ -295,7 +295,7 @@ public:
   {
     Eigen::Isometry3d node_transform;
     if (detections_are_absolute_) {
-      edge_measurement_ = _detection_odometry.odom_ref.inverse() * measured_plane_;
+      edge_measurement_ = _detection_odometry.map_ref.inverse() * measured_plane_;
       node_estimation_ = measured_plane_;
       node_transform = Eigen::Isometry3d::Identity();
     } else {
