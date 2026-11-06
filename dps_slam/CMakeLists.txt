@@ -169,9 +169,10 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
   find_package(ament_cmake_gtest REQUIRED)
-  # Pure-g2o unit tests (no ROS runtime): custom cylinder-axis vertex/edge.
+  # Pure-g2o unit tests (no ROS runtime): custom cylinder-axis and line vertices/edges.
   set(TEST_SOURCE_CPP_FILES
     tests/test_cylinder_axis.cpp
+    tests/test_line3d.cpp
     src/g2o_edge_types.cpp)
 
   if(TEST_SOURCE_CPP_FILES)

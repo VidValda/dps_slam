@@ -163,6 +163,122 @@ public:
   }
 };
 
+// Re-expresses a 4x4 line covariance over [dir_b1, dir_b2, offset_b1, offset_b2], given in
+// the tangent basis of `direction`, in the tangent basis of R * direction.
+inline Eigen::Matrix4d rotateLineCovariance(
+  const Eigen::Matrix4d & cov, const Eigen::Vector3d & direction, const Eigen::Matrix3d & R)
+{
+  Eigen::Vector3d b1, b2, c1, c2;
+  directionTangentBasis(direction.normalized(), b1, b2);
+  directionTangentBasis((R * direction).normalized(), c1, c2);
+  Eigen::Matrix2d J;
+  J << c1.dot(R * b1), c1.dot(R * b2), c2.dot(R * b1), c2.dot(R * b2);
+  Eigen::Matrix4d A = Eigen::Matrix4d::Zero();
+  A.block<2, 2>(0, 0) = J;
+  A.block<2, 2>(2, 2) = J;
+  return A * cov * A.transpose();
+}
+
+// Infinite 3D line landmark (4-DOF). The estimate stores [p(3); d(3, unit)], p the point of
+// the line closest to the origin (p . d = 0). An update tilts d in its tangent plane (2) and
+// shifts p across the line (2); nothing moves the line along itself.
+class VertexLine3D : public g2o::BaseVertex<4, Eigen::Matrix<double, 6, 1>>
+{
+public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  VertexLine3D() {}
+
+  static Eigen::Matrix<double, 6, 1> fromPointDirection(
+    const Eigen::Vector3d & point, const Eigen::Vector3d & direction)
+  {
+    Eigen::Matrix<double, 6, 1> state;
+    const Eigen::Vector3d d = direction.normalized();
+    state.head<3>() = point - point.dot(d) * d;
+    state.tail<3>() = d;
+    return state;
+  }
+
+  void setToOriginImpl() override
+  {
+    _estimate.setZero();
+    _estimate[5] = 1.0;
+  }
+
+  void oplusImpl(const double * update) override
+  {
+    Eigen::Vector3d d = direction();
+    Eigen::Vector3d b1, b2;
+    directionTangentBasis(d, b1, b2);
+    const Eigen::Vector3d p = point() + b1 * update[2] + b2 * update[3];
+    d = (d + b1 * update[0] + b2 * update[1]).normalized();
+    _estimate = fromPointDirection(p, d);
+  }
+
+  Eigen::Vector3d point() const {return _estimate.head<3>();}
+  Eigen::Vector3d direction() const {return _estimate.tail<3>().normalized();}
+
+  bool read(std::istream & is) override
+  {
+    for (int i = 0; i < 6; ++i) {is >> _estimate[i];}
+    return true;
+  }
+
+  bool write(std::ostream & os) const override
+  {
+    for (int i = 0; i < 6; ++i) {os << _estimate[i] << " ";}
+    return os.good();
+  }
+};
+
+// Binary edge constraining a robot SE3 pose to an infinite line. Measurement: [q(3); m(3)],
+// a point on the line and its direction in the robot frame. Error (4-DOF), predicted minus
+// measured in the tangent basis of m: the direction difference, then the offset from q to the
+// predicted line. A shift of q along the line changes nothing.
+class EdgeSE3Line3D : public g2o::BaseBinaryEdge<4, Eigen::Matrix<double, 6, 1>,
+    g2o::VertexSE3, VertexLine3D>
+{
+public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  EdgeSE3Line3D() {}
+
+  void computeError() override
+  {
+    const g2o::VertexSE3 * se3 = static_cast<const g2o::VertexSE3 *>(_vertices[0]);
+    const VertexLine3D * line = static_cast<const VertexLine3D *>(_vertices[1]);
+
+    const Eigen::Isometry3d T_inv = se3->estimate().inverse();
+    const Eigen::Vector3d p_robot = T_inv * line->point();
+    const Eigen::Vector3d q = _measurement.head<3>();
+    const Eigen::Vector3d m = _measurement.tail<3>().normalized();
+    Eigen::Vector3d d_robot = (T_inv.rotation() * line->direction()).normalized();
+    if (d_robot.dot(m) < 0.0) {d_robot = -d_robot;}
+
+    Eigen::Vector3d b1, b2;
+    directionTangentBasis(m, b1, b2);
+    const Eigen::Vector3d v = p_robot - q;
+    const Eigen::Vector3d offset = v - v.dot(d_robot) * d_robot;
+
+    _error[0] = b1.dot(d_robot - m);
+    _error[1] = b2.dot(d_robot - m);
+    _error[2] = b1.dot(offset);
+    _error[3] = b2.dot(offset);
+  }
+
+  bool read(std::istream & is) override
+  {
+    for (int i = 0; i < 6; ++i) {is >> _measurement[i];}
+    return true;
+  }
+
+  bool write(std::ostream & os) const override
+  {
+    for (int i = 0; i < 6; ++i) {os << _measurement[i] << " ";}
+    return os.good();
+  }
+};
+
 class EdgeSE3Point3D : public g2o::BaseBinaryEdge<3, Eigen::Vector3d, g2o::VertexSE3,
     g2o::VertexPointXYZ>
 {

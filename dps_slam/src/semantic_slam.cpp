@@ -394,6 +394,9 @@ void SemanticSlam::detectionsCallback(
       case dps_slam_msgs::msg::Geometry::CYLINDER:
         processCylinderDetection(detection, msg->header, detection_odometry_info);
         break;
+      case dps_slam_msgs::msg::Geometry::LINE3D:
+        processLine3DDetection(detection, msg->header, detection_odometry_info);
+        break;
       case dps_slam_msgs::msg::Geometry::VECTOR:
         WARN("Detection geometry not yet supported by the backend: "
           << static_cast<int>(detection.geometry.type));
@@ -520,6 +523,51 @@ void SemanticSlam::processCylinderDetection(
     cylinder_id, top, axis, cylinder_covariance, radius, height, detections_are_absolute);
 
   optimizer_ptr_->handleNewObjectDetection(cylinder_object, _detection_odometry_info);
+}
+
+void SemanticSlam::processLine3DDetection(
+  const dps_slam_msgs::msg::DetectionWithID _msg,
+  const std_msgs::msg::Header _header,
+  const OdometryInfo _detection_odometry_info)
+{
+  std::string line_id = _msg.id;
+  std::string object_type = _msg.label.empty() ? force_object_type_ : _msg.label;
+  const auto & line = _msg.geometry.line3d;
+
+  geometry_msgs::msg::Pose identity;
+  identity.orientation.w = 1.0;
+  const Eigen::Isometry3d msg_to_robot = generatePoseFromMsg(identity, _header);
+  const Eigen::Vector3d direction_msg =
+    Eigen::Vector3d(line.direction.x, line.direction.y, line.direction.z).normalized();
+  const Eigen::Vector3d point =
+    msg_to_robot * Eigen::Vector3d(line.point.x, line.point.y, line.point.z);
+  const Eigen::Vector3d direction = msg_to_robot.rotation() * direction_msg;
+
+  Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> msg_covariance(
+    line.covariance.data());
+  Eigen::Matrix4d line_covariance = Eigen::Matrix4d::Zero();
+  if (!msg_covariance.isZero()) {
+    line_covariance = g2o_custom::rotateLineCovariance(
+      msg_covariance, direction_msg, msg_to_robot.rotation());
+  } else {
+    line_covariance(0, 0) = line_covariance(1, 1) =
+      detection_covariance_factor_ * detection_orientation_covariance_factor_;
+    line_covariance(2, 2) = line_covariance(3, 3) = detection_covariance_factor_;
+  }
+
+  bool detections_are_absolute = false;
+
+  if (csv_logger_) {
+    csv_logger_->logDetection(
+      _header.stamp.sec, _header.stamp.nanosec,
+      line_id, object_type, point,
+      _detection_odometry_info.odom_ref.translation(), detections_are_absolute);
+  }
+
+  ObjectDetection * line_object = new Line3DDetection(
+    line_id, point, direction, line_covariance, detections_are_absolute);
+
+  optimizer_ptr_->handleNewObjectDetection(line_object, _detection_odometry_info);
 }
 
 void SemanticSlam::processPoseDetection(
@@ -864,6 +912,14 @@ void SemanticSlam::publishOptimizedDetections(const std_msgs::msg::Header & _hea
       detection.geometry.cylinder.pose.pose.orientation.w = q.w();
       detection.geometry.cylinder.radius = cylinder_node->getRadius();
       detection.geometry.cylinder.height = cylinder_node->getHeight();
+    } else if (auto * line_node = dynamic_cast<GraphNodeLine3D *>(node)) {
+      detection.label = "line";
+      detection.geometry.type = dps_slam_msgs::msg::Geometry::LINE3D;
+      const Eigen::Vector3d dir = line_node->getDirection();
+      detection.geometry.line3d.point = convertToGeometryMsgPoint(line_node->getPoint());
+      detection.geometry.line3d.direction.x = dir.x();
+      detection.geometry.line3d.direction.y = dir.y();
+      detection.geometry.line3d.direction.z = dir.z();
     } else if (auto * plane_node = dynamic_cast<GraphNodePlane *>(node)) {
       detection.label = "wall";
       detection.geometry.type = dps_slam_msgs::msg::Geometry::LINE;

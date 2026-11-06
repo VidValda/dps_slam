@@ -584,6 +584,93 @@ protected:
   Eigen::MatrixXd cov_matrix_;
 };
 
+// Infinite 3D line landmark node (4-DOF, see g2o_custom::VertexLine3D). The mean of the observed
+// points along the line only places the drawn segment; it is not optimized.
+class GraphNodeLine3D : public GraphNode
+{
+public:
+  GraphNodeLine3D(const Eigen::Matrix<double, 6, 1> & _state, const Eigen::Vector3d & _seen)
+  : seen_sum_(_seen)
+  {
+    vertex_ = new g2o_custom::VertexLine3D();
+    vertex_->setEstimate(_state);
+  }
+  ~GraphNodeLine3D() {}
+
+  g2o::HyperGraph::Vertex * getVertex() override
+  {
+    return static_cast<g2o::HyperGraph::Vertex *>(vertex_);
+  }
+
+  g2o_custom::VertexLine3D * getVertexLine3D() {return vertex_;}
+
+  visualization_msgs::msg::Marker getVizMarker(const bool _main) override
+  {
+    const Eigen::Vector3d dir = getDirection();
+    const Eigen::Vector3d seen = seen_sum_ / static_cast<double>(n_seen_);
+    const Eigen::Vector3d center = getPoint() + (seen - getPoint()).dot(dir) * dir;
+    const Eigen::Quaterniond q = Eigen::Quaterniond::FromTwoVectors(Eigen::Vector3d::UnitZ(), dir);
+
+    visualization_msgs::msg::Marker node_marker_msg;
+    node_marker_msg.type = node_marker_msg.CYLINDER;
+    node_marker_msg.ns = getVizMarkerNamespace();
+    node_marker_msg.id = vertex_->id();
+    node_marker_msg.pose.position.x = center.x();
+    node_marker_msg.pose.position.y = center.y();
+    node_marker_msg.pose.position.z = center.z();
+    node_marker_msg.pose.orientation.x = q.x();
+    node_marker_msg.pose.orientation.y = q.y();
+    node_marker_msg.pose.orientation.z = q.z();
+    node_marker_msg.pose.orientation.w = q.w();
+    node_marker_msg.scale.x = 0.08;
+    node_marker_msg.scale.y = 0.08;
+    node_marker_msg.scale.z = viz_length_;
+    Eigen::Vector4d color = getVizMarkerColor(_main);
+    node_marker_msg.color.r = color[0];
+    node_marker_msg.color.g = color[1];
+    node_marker_msg.color.b = color[2];
+    node_marker_msg.color.a = color[3];
+    return node_marker_msg;
+  }
+
+  void setFixed() override {vertex_->setFixed(true);}
+  Eigen::Vector3d getPoint() {return vertex_->point();}
+  Eigen::Vector3d getDirection() {return vertex_->direction();}
+  Eigen::Vector3d getSeenPoint() {return seen_sum_ / static_cast<double>(n_seen_);}
+  void addSeenPoint(const Eigen::Vector3d & _point)
+  {
+    seen_sum_ += _point;
+    n_seen_++;
+  }
+  void setCovariance(const Eigen::MatrixXd & _cov_matrix) {cov_matrix_ = _cov_matrix;}
+  Eigen::MatrixXd getCovariance() {return cov_matrix_;}
+
+protected:
+  std::string getNodeName() override {return node_name_;}
+  std::string getVizMarkerNamespace() override
+  {
+    return element_name_ + "/" + getNodeName();
+  }
+  Eigen::Vector4d getVizColor() override {return viz_color_;}
+  Eigen::Vector4d getVizMarkerColor(const bool _main) override
+  {
+    if (_main) {
+      return getVizColor();
+    } else {
+      return getVizColor() * 0.5;
+    }
+  }
+
+  g2o_custom::VertexLine3D * vertex_;
+  Eigen::Vector3d seen_sum_;
+  int n_seen_ = 1;
+  double viz_length_ = 3.0;
+  std::string element_name_ = "node";
+  std::string node_name_ = "Line3D";
+  Eigen::Vector4d viz_color_ = {0.0, 0.8, 1.0, 1.0};
+  Eigen::MatrixXd cov_matrix_;
+};
+
 class GateNode : public GraphNodePoint3D
 {
 public:

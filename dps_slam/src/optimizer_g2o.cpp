@@ -293,6 +293,32 @@ bool OptimizerG2O::handleNewOdom(
               cov_matrix, cylinder_node->getRadius(), cylinder_node->getHeight(), true);
           }
 
+          GraphNodeLine3D * line_node = dynamic_cast<GraphNodeLine3D *>(object.second);
+          if (line_node) {
+            Eigen::MatrixXd cov_matrix = temp_graph->computeNodeCovariance(line_node);
+            const Eigen::Vector3d dir = line_node->getDirection();
+            const Eigen::Vector3d on_line = line_node->getPoint() +
+              (line_node->getSeenPoint() - line_node->getPoint()).dot(dir) * dir;
+            merge_log << temp_nodes << "," << temp_edges << "," << temp_objects << ",1,"
+                      << object.first << ","
+                      << on_line.x() << ","
+                      << on_line.y() << ","
+                      << on_line.z() << ","
+                      << cov_matrix.size() << ",";
+            if (cov_matrix.size() > 0) {
+              merge_log << cov_matrix.diagonal().transpose();
+            } else {
+              merge_log << "empty";
+            }
+            merge_log << "," << new_odometry_info.map_ref.translation().x()
+                      << "," << new_odometry_info.map_ref.translation().y()
+                      << "," << new_odometry_info.map_ref.translation().z()
+                      << "," << main_graph->graph_->vertices().size()
+                      << "," << main_graph->graph_->edges().size() << std::endl;
+            if (cov_matrix.size() == 0) { continue; }
+            object_detection = new Line3DDetection(object.first, on_line, dir, cov_matrix, true);
+          }
+
           GraphNodePlane * plane_node = dynamic_cast<GraphNodePlane *>(object.second);
           if (plane_node) {
             Eigen::MatrixXd cov_matrix = temp_graph->computeNodeCovariance(plane_node);

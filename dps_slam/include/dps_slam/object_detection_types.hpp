@@ -281,6 +281,67 @@ protected:
   double height_;
 };
 
+// Infinite-line detection: any point on the line + direction. Covariance is 4x4 over
+// [direction b1, b2; offset b1, b2] in the tangent basis of the direction.
+class Line3DDetection : public ObjectDetectionBase
+{
+public:
+  Line3DDetection(
+    const std::string & _id, const Eigen::Vector3d & _point, const Eigen::Vector3d & _direction,
+    const Eigen::MatrixXd & _covariance, const bool _detections_are_absolute)
+  : ObjectDetectionBase(_id, _covariance, _detections_are_absolute),
+    point_(_point), direction_(_direction.normalized()), measured_covariance_(_covariance) {}
+
+  bool prepareMeasurements(const OdometryInfo & _detection_odometry) override
+  {
+    if (detections_are_absolute_) {
+      const Eigen::Isometry3d map_inv = _detection_odometry.map_ref.inverse();
+      edge_measurement_.head<3>() = map_inv * point_;
+      edge_measurement_.tail<3>() = (map_inv.rotation() * direction_).normalized();
+      seen_point_ = point_;
+      node_estimation_ = g2o_custom::VertexLine3D::fromPointDirection(point_, direction_);
+      // The covariance basis follows the direction, so it changes with the frame.
+      covariance_matrix_ = g2o_custom::rotateLineCovariance(
+        measured_covariance_, direction_, map_inv.rotation());
+      information_matrix_ = covariance_matrix_.inverse();
+    } else {
+      edge_measurement_.head<3>() = point_;
+      edge_measurement_.tail<3>() = direction_;
+      seen_point_ = _detection_odometry.map_ref * point_;
+      node_estimation_ = g2o_custom::VertexLine3D::fromPointDirection(
+        seen_point_, _detection_odometry.map_ref.rotation() * direction_);
+    }
+    return true;
+  }
+
+  GraphNode * createNode() override
+  {
+    GraphNodeLine3D * node = new GraphNodeLine3D(node_estimation_, seen_point_);
+    node->setCovariance(covariance_matrix_);
+    return node;
+  }
+
+  GraphEdge * createEdge(GraphNode * _node, GraphNode * _detection_node) override
+  {
+    GraphNodeSE3 * node_se3 = dynamic_cast<GraphNodeSE3 *>(_node);
+    GraphNodeLine3D * node_line = dynamic_cast<GraphNodeLine3D *>(_detection_node);
+    if (!node_se3 || !node_line) {
+      ERROR("Line3D edge: reference or detection node has wrong type");
+      return nullptr;
+    }
+    node_line->addSeenPoint(seen_point_);
+    return new Line3DEdge(node_se3, node_line, edge_measurement_, information_matrix_);
+  }
+
+protected:
+  Eigen::Vector3d point_;
+  Eigen::Vector3d direction_;
+  Eigen::MatrixXd measured_covariance_;
+  Eigen::Vector3d seen_point_;
+  Eigen::Matrix<double, 6, 1> node_estimation_;
+  Eigen::Matrix<double, 6, 1> edge_measurement_;
+};
+
 class ObjectDetectionPlane : public ObjectDetectionBase
 {
 public:
