@@ -75,6 +75,8 @@ struct OptimizerG2OParameters
   double odom_covariance_floor = 1e-4;
   // < 0 uses odom_covariance_floor.
   double odom_yaw_covariance_floor = -1.0;
+  // x, y, z only; < 0 uses odom_covariance_floor.
+  double odom_translation_covariance_floor = -1.0;
   // Std (deg) of a prior keeping every wall (plane) landmark vertical; <= 0 disables it.
   double wall_vertical_prior_std_deg = 0.0;
   double wall_manhattan_prior_std_deg = 0.0;
@@ -172,6 +174,7 @@ private:
   double robust_kernel_delta_ = 3.0;
   double odom_covariance_floor_ = 1e-4;
   double odom_yaw_covariance_floor_ = -1.0;
+  double odom_translation_covariance_floor_ = -1.0;
   double wall_vertical_prior_std_rad_ = 0.0;
   double wall_manhattan_prior_std_rad_ = 0.0;
   double wall_manhattan_reference_yaw_rad_ = 0.0;

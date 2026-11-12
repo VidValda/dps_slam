@@ -127,6 +127,9 @@ bool OptimizerG2O::generateOdometryInfo(
     if (odom_yaw_covariance_floor_ >= 0.0) {
       floors(5) = odom_yaw_covariance_floor_;
     }
+    if (odom_translation_covariance_floor_ >= 0.0) {
+      floors.head<3>().setConstant(odom_translation_covariance_floor_);
+    }
     _odometry_info.covariance_matrix.diagonal() =
       _odometry_info.covariance_matrix.diagonal().cwiseMax(floors);
   }
@@ -532,6 +535,7 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   robust_kernel_delta_ = _params.robust_kernel_delta;
   odom_covariance_floor_ = _params.odom_covariance_floor;
   odom_yaw_covariance_floor_ = _params.odom_yaw_covariance_floor;
+  odom_translation_covariance_floor_ = _params.odom_translation_covariance_floor;
   wall_vertical_prior_std_rad_ = _params.wall_vertical_prior_std_deg * M_PI / 180.0;
   main_graph->setRobustKernelDelta(robust_kernel_delta_);
   main_graph->setRestrictKeyframeHeightToOdometry(restrict_map_odom_correction_to_xy_yaw_);
@@ -558,6 +562,7 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   PARAM(PRINT_VAR(robust_kernel_delta_));
   PARAM(PRINT_VAR(odom_covariance_floor_));
   PARAM(PRINT_VAR(odom_yaw_covariance_floor_));
+  PARAM(PRINT_VAR(odom_translation_covariance_floor_));
   PARAM(PRINT_VAR(wall_vertical_prior_std_rad_));
 
   // Anchor edge for absolute orientation; keep yaw as tight as the other axes so the
