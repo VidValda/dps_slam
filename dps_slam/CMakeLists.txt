@@ -173,6 +173,7 @@ if(BUILD_TESTING)
   set(TEST_SOURCE_CPP_FILES
     tests/test_cylinder_axis.cpp
     tests/test_line3d.cpp
+    tests/test_odom_information.cpp
     src/g2o_edge_types.cpp)
 
   if(TEST_SOURCE_CPP_FILES)

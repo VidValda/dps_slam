@@ -57,6 +57,16 @@ Eigen::Matrix3d skewSymmetric(const Eigen::Vector3d & v);
 namespace g2o_custom
 {
 
+// Information of a g2o::EdgeSE3 from a (x, y, z, roll, pitch, yaw) covariance in m^2 and rad^2: the edge's rotation
+// error is the quaternion vector part, half the angle.
+inline Eigen::Matrix<double, 6, 6> se3InformationFromCovariance(const Eigen::Matrix<double, 6, 6> & _covariance)
+{
+  Eigen::Matrix<double, 6, 6> covariance = _covariance;
+  covariance.bottomRows<3>() *= 0.5;
+  covariance.rightCols<3>() *= 0.5;
+  return covariance.inverse();
+}
+
 // Orthonormal basis (b1, b2) of the tangent plane at unit direction d, so that
 // (d, b1, b2) is a right-handed frame. Used both for the minimal 2-DOF update
 // of a cylinder axis direction and for projecting direction residuals.

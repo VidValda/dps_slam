@@ -313,7 +313,7 @@ void GraphG2O::addNewKeyframe(
   OdomNode * odom_node(new OdomNode(_absolute_pose));
   addNode(*odom_node);
 
-  Eigen::MatrixXd information_matrix = _relative_covariance.inverse();
+  Eigen::MatrixXd information_matrix = g2o_custom::se3InformationFromCovariance(_relative_covariance);
   OdomEdge * odom_edge(new OdomEdge(
       last_odom_node_, odom_node, _relative_pose,
       information_matrix));
