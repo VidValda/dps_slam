@@ -888,7 +888,7 @@ void SemanticSlam::publishOptimizedDetections(const std_msgs::msg::Header & _hea
 
   dps_slam_msgs::msg::DetectionWithIDArray detections_msg;
   detections_msg.header.stamp = _header.stamp;
-  detections_msg.header.frame_id = estimated_map_frame_;
+  detections_msg.header.frame_id = earth_frame_;
 
   for (auto & id_node : optimizer_ptr_->main_graph->getObjectNodes()) {
     GraphNode * node = id_node.second;
