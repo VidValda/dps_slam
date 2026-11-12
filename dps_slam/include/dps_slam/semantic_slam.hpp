@@ -149,6 +149,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     corrected_localization_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr corrected_path_pub_;
+  bool publish_tf_ = true;
 
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_{nullptr};

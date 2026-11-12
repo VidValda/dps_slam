@@ -164,6 +164,8 @@ SemanticSlam::SemanticSlam(rclcpp::NodeOptions & options)
   optimized_detections_pub_ = this->create_publisher<dps_slam_msgs::msg::DetectionWithIDArray>(
     optimized_detections_topic, reliable_qos);
   PARAM("Publishing optimized detections on: " << optimized_detections_topic);
+  this->get_parameter_or("publish_tf", publish_tf_, true);
+  PARAM("Publish map -> odom and earth -> map on TF: " << (publish_tf_ ? "true" : "false"));
   if (visualize_graphs_) {
     viz_main_markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
       viz_main_markers_topic, reliable_qos);
@@ -215,6 +217,12 @@ SemanticSlam::SemanticSlam(rclcpp::NodeOptions & options)
       }
       std_msgs::msg::Header header;
       header.stamp = this->now();
+      if (!publish_tf_) {
+        if (!generate_odom_map_transform_) {
+          tf_publish_timer_->cancel();
+        }
+        return;
+      }
       updateMapOdomTransform(header);
       tf_broadcaster_->sendTransform(map_odom_transform_msg_);
       updateEarthMapTransform(header);
