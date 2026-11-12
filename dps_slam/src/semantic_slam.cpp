@@ -1065,6 +1065,10 @@ OptimizerG2OParameters SemanticSlam::getOptimizerParameters() {
     optimizer_params.odom_covariance_floor =
       this->get_parameter("odom_covariance_floor").as_double();
   }
+  if (this->has_parameter("odom_yaw_covariance_floor")) {
+    optimizer_params.odom_yaw_covariance_floor =
+      this->get_parameter("odom_yaw_covariance_floor").as_double();
+  }
   if (this->has_parameter("wall_vertical_prior_std_deg")) {
     optimizer_params.wall_vertical_prior_std_deg =
       this->get_parameter("wall_vertical_prior_std_deg").as_double();

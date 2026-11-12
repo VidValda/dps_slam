@@ -32,6 +32,8 @@
     # calculate_odom_covariance: false). Write decimals (0.0001), not 1e-4: launch arguments
     # without a '.' are not parsed as doubles.
     odom_covariance_floor: 0.0001
+    # < 0 uses odom_covariance_floor.
+    odom_yaw_covariance_floor: -1.0
     # > 0: std (deg) of a prior keeping every wall landmark vertical (walls come from 2D lines).
     wall_vertical_prior_std_deg: 0.0
     map_odom_transform_alpha: 1.0
