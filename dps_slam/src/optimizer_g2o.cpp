@@ -323,7 +323,11 @@ bool OptimizerG2O::handleNewOdom(
                       << "," << main_graph->graph_->vertices().size()
                       << "," << main_graph->graph_->edges().size() << std::endl;
             if (cov_matrix.size() == 0) { continue; }
-            object_detection = new Line3DDetection(object.first, on_line, dir, cov_matrix, true);
+            const double s = (on_line - line_node->getPoint()).dot(dir);
+            Eigen::Matrix4d lever = Eigen::Matrix4d::Identity();
+            lever.block<2, 2>(2, 0) = s * Eigen::Matrix2d::Identity();
+            const Eigen::Matrix4d cov_on_line = lever * cov_matrix * lever.transpose();
+            object_detection = new Line3DDetection(object.first, on_line, dir, cov_on_line, true);
           }
 
           GraphNodePlane * plane_node = dynamic_cast<GraphNodePlane *>(object.second);
