@@ -68,6 +68,7 @@ struct OptimizerG2OParameters
   bool generate_odom_map_transform;
   bool calculate_odom_covariance_;
   bool restrict_map_odom_correction_to_xy_yaw;
+  bool level_keyframes_to_odometry = false;
   bool throttle_detections;
   bool use_dual_graph;
   double robust_kernel_delta;  // Huber delta applied to every graph edge
@@ -169,6 +170,7 @@ private:
   bool generate_odom_map_transform_ = false;
   bool calculate_odom_covariance_ = false;
   bool restrict_map_odom_correction_to_xy_yaw_ = true;
+  bool level_keyframes_to_odometry_ = false;
   bool throttle_detections_ = true;
   bool use_dual_graph_ = true;
   double robust_kernel_delta_ = 3.0;

@@ -258,6 +258,11 @@ void GraphG2O::setRobustKernelDelta(double _delta)
   robust_kernel_delta_ = _delta;
 }
 
+void GraphG2O::setLevelKeyframesToOdometry(bool _level)
+{
+  level_keyframes_to_odometry_ = _level;
+}
+
 void GraphG2O::setRestrictKeyframeHeightToOdometry(bool _restrict)
 {
   restrict_keyframe_height_to_odometry_ = _restrict;
@@ -335,6 +340,14 @@ void GraphG2O::addNewKeyframe(
     // This is a hard constraint, not a fallible observation; addEdge() attaches a
     // Huber kernel by default, which would cap its pull after a few mm of residual.
     height_prior_edge->getEdgeSE3Prior()->setRobustKernel(nullptr);
+  }
+  if (level_keyframes_to_odometry_) {
+    auto * gravity = new g2o_custom::EdgeSE3Gravity();
+    gravity->setId(n_edges_++);
+    gravity->setVertex(0, odom_node->getVertexSE3());
+    gravity->setMeasurement(g2o_custom::EdgeSE3Gravity::up(_absolute_pose));
+    gravity->setInformation(Eigen::Matrix2d::Identity() * 1e6);
+    graph_->addEdge(gravity);
   }
 
   last_odom_node_ = odom_node;

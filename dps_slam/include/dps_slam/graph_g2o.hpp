@@ -108,6 +108,7 @@ public:
   // When true (default), every keyframe added from now on gets a HeightPriorEdge
   // pinning its z to raw odometry. See graph_edge_types.hpp.
   void setRestrictKeyframeHeightToOdometry(bool _restrict);
+  void setLevelKeyframesToOdometry(bool _level);
   // Std (rad) of a prior keeping every plane landmark added from now on vertical
   // (g2o_custom::EdgePlaneVertical); <= 0 disables it.
   void setWallVerticalPriorStd(double _std_rad);
@@ -129,6 +130,7 @@ private:
   std::vector<GraphEdge *> graph_edges_;
   double robust_kernel_delta_ = 3.0;
   bool restrict_keyframe_height_to_odometry_ = true;
+  bool level_keyframes_to_odometry_ = false;
   double wall_vertical_prior_std_rad_ = 0.0;
   double wall_manhattan_prior_std_rad_ = 0.0;
   double wall_manhattan_reference_yaw_rad_ = 0.0;

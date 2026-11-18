@@ -1051,6 +1051,9 @@ OptimizerG2OParameters SemanticSlam::getOptimizerParameters() {
     optimizer_params.restrict_map_odom_correction_to_xy_yaw = true;
   }
   restrict_map_odom_correction_to_xy_yaw_ = optimizer_params.restrict_map_odom_correction_to_xy_yaw;
+  if (this->has_parameter("level_keyframes_to_odometry")) {
+    optimizer_params.level_keyframes_to_odometry = this->get_parameter("level_keyframes_to_odometry").as_bool();
+  }
   if (this->has_parameter("throttle_detections")) {
     optimizer_params.throttle_detections = this->get_parameter(
       "throttle_detections").as_bool();

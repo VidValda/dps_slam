@@ -401,6 +401,32 @@ public:
   }
 };
 
+class EdgeSE3Gravity : public g2o::BaseUnaryEdge<2, Eigen::Vector3d, g2o::VertexSE3>
+{
+public:
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  EdgeSE3Gravity() {setMeasurement(Eigen::Vector3d::UnitZ());}
+
+  static Eigen::Vector3d up(const Eigen::Isometry3d & _pose)
+  {
+    return _pose.rotation().transpose() * Eigen::Vector3d::UnitZ();
+  }
+
+  void computeError() override
+  {
+    const g2o::VertexSE3 * pose = static_cast<const g2o::VertexSE3 *>(_vertices[0]);
+    _error = (up(pose->estimate()) - _measurement).head<2>();
+  }
+
+  bool read(std::istream & is) override {is >> _measurement[0] >> _measurement[1] >> _measurement[2]; return true;}
+  bool write(std::ostream & os) const override
+  {
+    os << _measurement[0] << " " << _measurement[1] << " " << _measurement[2] << " ";
+    return os.good();
+  }
+};
+
 // Unary prior keeping a plane vertical: the error is the elevation of its normal (0 for a wall).
 // Wall landmarks come from 2D lines, so they are vertical by construction; without this the
 // optimizer can tip one over (seen: a wall drawn 11 m up, its plane turned near horizontal).

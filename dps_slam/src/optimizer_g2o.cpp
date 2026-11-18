@@ -385,6 +385,7 @@ bool OptimizerG2O::handleNewOdom(
     temp_graph = std::make_shared<GraphG2O>("Temp Graph");
     temp_graph->setRobustKernelDelta(robust_kernel_delta_);
     temp_graph->setRestrictKeyframeHeightToOdometry(restrict_map_odom_correction_to_xy_yaw_);
+    temp_graph->setLevelKeyframesToOdometry(level_keyframes_to_odometry_);
     temp_graph->setWallVerticalPriorStd(wall_vertical_prior_std_rad_);
     temp_graph_generated_ = false;
   }
@@ -530,6 +531,7 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   storeTransformCache();
   calculate_odom_covariance_ = _params.calculate_odom_covariance_;
   restrict_map_odom_correction_to_xy_yaw_ = _params.restrict_map_odom_correction_to_xy_yaw;
+  level_keyframes_to_odometry_ = _params.level_keyframes_to_odometry;
   throttle_detections_ = _params.throttle_detections;
   use_dual_graph_ = _params.use_dual_graph;
   robust_kernel_delta_ = _params.robust_kernel_delta;
@@ -539,6 +541,7 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   wall_vertical_prior_std_rad_ = _params.wall_vertical_prior_std_deg * M_PI / 180.0;
   main_graph->setRobustKernelDelta(robust_kernel_delta_);
   main_graph->setRestrictKeyframeHeightToOdometry(restrict_map_odom_correction_to_xy_yaw_);
+  main_graph->setLevelKeyframesToOdometry(level_keyframes_to_odometry_);
   wall_manhattan_prior_std_rad_ = _params.wall_manhattan_prior_std_deg * M_PI / 180.0;
   wall_manhattan_reference_yaw_rad_ = _params.wall_manhattan_reference_yaw_deg * M_PI / 180.0;
   wall_manhattan_max_deviation_rad_ = _params.wall_manhattan_max_deviation_deg * M_PI / 180.0;
@@ -549,6 +552,7 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   if (temp_graph) {
     temp_graph->setRobustKernelDelta(robust_kernel_delta_);
     temp_graph->setRestrictKeyframeHeightToOdometry(restrict_map_odom_correction_to_xy_yaw_);
+    temp_graph->setLevelKeyframesToOdometry(level_keyframes_to_odometry_);
     temp_graph->setWallVerticalPriorStd(wall_vertical_prior_std_rad_);
   }
 
@@ -558,6 +562,7 @@ void OptimizerG2O::setParameters(const OptimizerG2OParameters & _params)
   PARAM(PRINT_VAR(map_odom_transform_alpha_));
   PARAM(PRINT_VAR(calculate_odom_covariance_));
   PARAM(PRINT_VAR(restrict_map_odom_correction_to_xy_yaw_));
+  PARAM(PRINT_VAR(level_keyframes_to_odometry_));
   PARAM(PRINT_VAR(use_dual_graph_));
   PARAM(PRINT_VAR(robust_kernel_delta_));
   PARAM(PRINT_VAR(odom_covariance_floor_));
@@ -613,20 +618,24 @@ void OptimizerG2O::updateOdomMapTransformLocked()
 
   // map_node_ is a real, non-fixed vertex chained to every keyframe, so it can also
   // drift in z/roll/pitch. Same restriction as new_map_odom_tranform below.
-  if (restrict_map_odom_correction_to_xy_yaw_) {
+  if (restrict_map_odom_correction_to_xy_yaw_ || level_keyframes_to_odometry_) {
     double map_yaw = std::atan2(earth_map_transform_.rotation()(1, 0), earth_map_transform_.rotation()(0, 0));
     earth_map_transform_.linear() = Eigen::AngleAxisd(map_yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-    earth_map_transform_.translation().z() = 0.0;
+    if (restrict_map_odom_correction_to_xy_yaw_) {
+      earth_map_transform_.translation().z() = 0.0;
+    }
   }
 
   Eigen::Isometry3d new_map_odom_tranform = earth_map_transform_.inverse() * getOptimizedPose() * last_odometry_added_.odometry.inverse();
 
   // Walls carry no height/roll/pitch information, so keep only x, y, yaw here --
   // height always comes straight from odometry, never the wall-informed graph.
-  if (restrict_map_odom_correction_to_xy_yaw_) {
+  if (restrict_map_odom_correction_to_xy_yaw_ || level_keyframes_to_odometry_) {
     double yaw = std::atan2(new_map_odom_tranform.rotation()(1, 0), new_map_odom_tranform.rotation()(0, 0));
     new_map_odom_tranform.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-    new_map_odom_tranform.translation().z() = 0.0;
+    if (restrict_map_odom_correction_to_xy_yaw_) {
+      new_map_odom_tranform.translation().z() = 0.0;
+    }
   }
   // Eigen::Isometry3d map_odom_diff = new_map_odom_tranform.inverse() * map_odom_tranform_;
   // if (map_odom_diff.translation().norm() > map_odom_security_threshold_) {
