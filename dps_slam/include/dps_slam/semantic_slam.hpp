@@ -48,6 +48,8 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <map>
+#include <mutex>
 #include <string>
 #include <memory>
 // ROS2 MSGS
@@ -93,6 +95,7 @@ private:
 
   // Publish the main graph's optimized object landmarks as a DetectionWithIDArray,
   // each in its native geometry (aruco->POSE, gate->POINT, wall->LINE).
+  std::string labelOf(const std::string & _id, const std::string & _fallback) const;
   void publishOptimizedDetections(const std_msgs::msg::Header & _header);
 
   visualization_msgs::msg::MarkerArray generateVizNodesMsg(std::shared_ptr<GraphG2O> & _graph);
@@ -175,6 +178,11 @@ private:
   // Treat Line2D detections as vertical planes of a gravity-aligned (yaw-only) frame and
   // tilt them by the sensor's roll/pitch, instead of as planes vertical in the sensor frame.
   bool line_detections_gravity_aligned_ = true;
+  // Labels of POINT detections mapped as 3D point landmarks ("gate" and, e.g., box3d's object classes)
+  std::vector<std::string> point_labels_ = {"gate"};
+  // Label of each mapped object id, echoed on slam/optimized_detections
+  std::map<std::string, std::string> object_labels_;
+  mutable std::mutex object_labels_mutex_;  // written by the detections callback group, read by the odometry one
   double detection_covariance_factor_ = 0.01;
   double detection_orientation_covariance_factor_ = 10;
   double distance_for_orientation_covariance_increment_ = 10;

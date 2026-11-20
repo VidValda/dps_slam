@@ -43,6 +43,7 @@
 #include <geometry_msgs/msg/detail/pose_stamped__struct.hpp>
 #include <geometry_msgs/msg/detail/pose_with_covariance_stamped__struct.hpp>
 #include <geometry_msgs/msg/detail/transform_stamped__struct.hpp>
+#include <algorithm>
 #include <memory>
 #include <rclcpp/subscription_options.hpp>
 #include <string>
@@ -97,6 +98,15 @@ SemanticSlam::SemanticSlam(rclcpp::NodeOptions & options)
       this->get_parameter("line_detections_gravity_aligned").as_bool();
   }
   PARAM(PRINT_VAR(line_detections_gravity_aligned_));
+
+  if (this->has_parameter("point_labels")) {
+    point_labels_ = this->get_parameter("point_labels").as_string_array();
+  }
+  {
+    std::string labels;
+    for (const auto & l : point_labels_) {labels += l + " ";}
+    PARAM("Point landmark labels: " + labels);
+  }
 
   detection_covariance_by_distance_ = this->get_parameter("detection_covariance_by_distance").as_bool();
   detection_covariance_by_distance2_ = this->get_parameter("detection_covariance_by_distance2").as_bool();
@@ -459,13 +469,16 @@ void SemanticSlam::processPointDetection(
       _detection_odometry_info.odom_ref.translation(), detections_are_absolute);
   }
 
-  // The concrete detection type depends on the object type (label), not the geometry.
+  // The concrete detection type depends on the object type (label), not the geometry: every
+  // label in point_labels is a 3D point landmark (the gate machinery: GateNode / GateEdge).
   ObjectDetection * point_object = nullptr;
-  if (object_type == "gate") {
+  if (std::find(point_labels_.begin(), point_labels_.end(), object_type) != point_labels_.end()) {
     point_object = new GateDetection(
       point_id, point_position, point_covariance, detections_are_absolute);
+    std::lock_guard<std::mutex> lock(object_labels_mutex_);
+    object_labels_[point_id] = object_type;
   } else {
-    ERROR("Unknown point object type: " << object_type);
+    ERROR("Unknown point object type: " << object_type << " (not in point_labels)");
     return;
   }
 
@@ -574,6 +587,10 @@ void SemanticSlam::processLine3DDetection(
 
   ObjectDetection * line_object = new Line3DDetection(
     line_id, point, direction, line_covariance, detections_are_absolute);
+  if (!object_type.empty()) {
+    std::lock_guard<std::mutex> lock(object_labels_mutex_);
+    object_labels_[line_id] = object_type;
+  }
 
   optimizer_ptr_->handleNewObjectDetection(line_object, _detection_odometry_info);
 }
@@ -880,6 +897,13 @@ void SemanticSlam::visualizeMainGraph()
   viz_main_markers_pub_->publish(viz_edges_msg);
 }
 
+std::string SemanticSlam::labelOf(const std::string & _id, const std::string & _fallback) const
+{
+  std::lock_guard<std::mutex> lock(object_labels_mutex_);
+  auto it = object_labels_.find(_id);
+  return it == object_labels_.end() ? _fallback : it->second;
+}
+
 void SemanticSlam::publishOptimizedDetections(const std_msgs::msg::Header & _header)
 {
   if (!optimized_detections_pub_ || !optimizer_ptr_->main_graph) {
@@ -902,7 +926,7 @@ void SemanticSlam::publishOptimizedDetections(const std_msgs::msg::Header & _hea
       detection.geometry.type = dps_slam_msgs::msg::Geometry::POSE;
       detection.geometry.pose.pose = convertToGeometryMsgPose(aruco_node->getPose());
     } else if (auto * gate_node = dynamic_cast<GateNode *>(node)) {
-      detection.label = "gate";
+      detection.label = labelOf(id_node.first, "gate");
       detection.geometry.type = dps_slam_msgs::msg::Geometry::POINT;
       detection.geometry.point.point = convertToGeometryMsgPoint(gate_node->getPosition());
     } else if (auto * cylinder_node = dynamic_cast<GraphNodeCylinder *>(node)) {
@@ -921,7 +945,7 @@ void SemanticSlam::publishOptimizedDetections(const std_msgs::msg::Header & _hea
       detection.geometry.cylinder.radius = cylinder_node->getRadius();
       detection.geometry.cylinder.height = cylinder_node->getHeight();
     } else if (auto * line_node = dynamic_cast<GraphNodeLine3D *>(node)) {
-      detection.label = "line";
+      detection.label = labelOf(id_node.first, "line");
       detection.geometry.type = dps_slam_msgs::msg::Geometry::LINE3D;
       const Eigen::Vector3d dir = line_node->getDirection();
       detection.geometry.line3d.point = convertToGeometryMsgPoint(line_node->getPoint());
