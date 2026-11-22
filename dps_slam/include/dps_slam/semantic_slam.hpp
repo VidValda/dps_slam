@@ -180,6 +180,8 @@ private:
   bool line_detections_gravity_aligned_ = true;
   // Labels of POINT detections mapped as 3D point landmarks ("gate" and, e.g., box3d's object classes)
   std::vector<std::string> point_labels_ = {"gate"};
+  // Labels of POSE detections mapped as SE3 landmarks ("aruco" and, e.g., box3d's 3D boxes of any class)
+  std::vector<std::string> pose_labels_ = {"aruco"};
   // Label of each mapped object id, echoed on slam/optimized_detections
   std::map<std::string, std::string> object_labels_;
   mutable std::mutex object_labels_mutex_;  // written by the detections callback group, read by the odometry one

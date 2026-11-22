@@ -107,6 +107,14 @@ SemanticSlam::SemanticSlam(rclcpp::NodeOptions & options)
     for (const auto & l : point_labels_) {labels += l + " ";}
     PARAM("Point landmark labels: " + labels);
   }
+  if (this->has_parameter("pose_labels")) {
+    pose_labels_ = this->get_parameter("pose_labels").as_string_array();
+  }
+  {
+    std::string labels;
+    for (const auto & l : pose_labels_) {labels += l + " ";}
+    PARAM("Pose (SE3) landmark labels: " + labels);
+  }
 
   detection_covariance_by_distance_ = this->get_parameter("detection_covariance_by_distance").as_bool();
   detection_covariance_by_distance2_ = this->get_parameter("detection_covariance_by_distance2").as_bool();
@@ -642,13 +650,18 @@ void SemanticSlam::processPoseDetection(
       _detection_odometry_info.odom_ref.translation(), detections_are_absolute);
   }
 
-  // The concrete detection type depends on the object type (label), not the geometry.
+  // The concrete detection type depends on the object type (label), not the geometry: every label in
+  // pose_labels is an SE3 landmark (the aruco machinery: ArucoNode / g2o EdgeSE3), e.g. a box3d 3D box.
+  // The covariance is the g2o EdgeSE3 one: [translation, quaternion xyz] in the measured pose's own frame
+  // (for a box: along its edges), so a detector can leave unobservable box directions loose.
   ObjectDetection * pose_object = nullptr;
-  if (object_type == "aruco") {
+  if (std::find(pose_labels_.begin(), pose_labels_.end(), object_type) != pose_labels_.end()) {
     pose_object = new ArucoDetection(
       pose_id, pose, pose_covariance, detections_are_absolute);
+    std::lock_guard<std::mutex> lock(object_labels_mutex_);
+    object_labels_[pose_id] = object_type;
   } else {
-    ERROR("Unknown pose object type: " << object_type);
+    ERROR("Unknown pose object type: " << object_type << " (not in pose_labels)");
     return;
   }
 
@@ -922,7 +935,7 @@ void SemanticSlam::publishOptimizedDetections(const std_msgs::msg::Header & _hea
     detection.id = id_node.first;
 
     if (auto * aruco_node = dynamic_cast<ArucoNode *>(node)) {
-      detection.label = "aruco";
+      detection.label = labelOf(id_node.first, "aruco");
       detection.geometry.type = dps_slam_msgs::msg::Geometry::POSE;
       detection.geometry.pose.pose = convertToGeometryMsgPose(aruco_node->getPose());
     } else if (auto * gate_node = dynamic_cast<GateNode *>(node)) {
